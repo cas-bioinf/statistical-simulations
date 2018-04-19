@@ -1,0 +1,45 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+```
+
+
+# Meddling with t-test
+
+What happens when we have large variance, small effect and filter by p-value?
+
+```{r}
+set.seed(14682456)
+
+result = data.frame(id = 1:10000, effect = NA, p = NA, lower_confidence = NA)
+true_effect = 2
+sd = 8
+sample_size = 5
+
+for(i in 1:10000) {
+  baseline = rnorm(sample_size, 0, sd)
+  treatment = rnorm(sample_size,  true_effect, sd)
+  test_result = t.test(treatment, baseline)
+  if(test_result$conf.int[2] < 0) {
+    result[i, "lower_confidence"] = test_result$conf.int[2] 
+  } else {
+    result[i, "lower_confidence"] = test_result$conf.int[1] 
+  }
+  result[i, "effect"] = mean(treatment) - mean(baseline)
+  result[i, "p"] = test_result$p.value
+}
+
+mean(result$p < 0.05)
+results_sig = result %>% filter(p < 0.05)  
+
+#results_sig %>% mutate(lower_confidence = abs(lower_confidence)) %>% gather(statistic, value, -p, -id) %>% #ggplot(aes(x = value)) + geom_histogram(bins = 30) + facet_wrap(~ statistic, scales = "free")
+
+results_sig %>% ggplot(aes(x = effect)) + geom_histogram(bins = 30) + geom_vline(xintercept = true_effect, color = "blue", size = 2)
+
+results_sig %>% filter(effect > 0) %>% summarize(mean_exaggeration = mean(effect), minimal_exaggeration = min(effect), lowest_effect = min(effect), effect_over_10 =  mean(effect > 10))
+results_sig %>% summarize(wrong_sign = mean(effect < 0), CI_higher_5 = mean(lower_confidence > 5), CI_higher_10 = mean(lower_confidence > 10))
+```
