@@ -1,4 +1,5 @@
-simulateDeSeq2 <- function(num_transcripts, num_replicates, percent_with_effect, effect_size, num_conditions = 2) {
+simulateDeSeq2 <- function(num_transcripts, num_replicates, percent_with_effect, effect_size) {
+  
   dispersion_sigma = abs(rnorm(1,0,1));
   #dispersion_sigma = 1;
   #asymptotic_dispersion = abs(rcauchy(1,0,0.2)) + 0.01;
@@ -11,15 +12,23 @@ simulateDeSeq2 <- function(num_transcripts, num_replicates, percent_with_effect,
   #intercept_sigma = abs(rnorm(1,0,1));
   #intercept_mean = abs(rnorm(1,0,1)) + 2;
   #coefficients_sigma = abs(rcauchy(num_conditions - 1, 0, 0.2)) + 0.1;
-
+  num_conditions = 2
+  
   coefficients = array(0, c(num_transcripts, num_conditions));
-  for(f in 1:(num_conditions - 1)) {
-    signs <- (-0.5 + rbinom(num_transcripts, 1, 0.5)) * 2
-    coefficients[,f] = rbinom(num_transcripts, 1, percent_with_effect) * signs * effect_size; 
-  }
-  #The intercept
-  coefficients[,num_conditions] = runif(num_transcripts, 3, 5) #abs(rnorm(num_transcripts, 0 , intercept_sigma)) + intercept_mean;
+  signs <- (-0.5 + rbinom(num_transcripts, 1, 0.5)) * 2
+  coefficients[,1] = rbinom(num_transcripts, 1, percent_with_effect) * signs * effect_size; 
+  
 
+  #The intercept - draw actual read counts from data by Olga
+  sample_means <- read_csv(here("sample_base_means.csv"), col_types =  cols(baseMean = col_double()))
+  base_intercept <- sample_means %>% sample_n(num_transcripts)
+  
+  coefficients[,num_conditions] = log2(base_intercept$baseMean)
+  
+  treatment_log_exp <- coefficients[,1] + coefficients[,2]
+  out_of_bounds <- treatment_log_exp > 20 | treatment_log_exp < -1
+  coefficients[out_of_bounds,1] <- -coefficients[out_of_bounds,1]
+  
   num_samples = num_replicates * num_conditions;
   
   design_matrix = array(0, c(num_conditions, num_conditions));

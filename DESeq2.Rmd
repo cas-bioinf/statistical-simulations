@@ -8,6 +8,7 @@ output: html_notebook
 library(DESeq2)
 library(tidyverse)
 library(here)
+library(readr)
 source(here::here("simulateDeSeq2.R"))
 ```
 
@@ -50,7 +51,7 @@ deSeqRun <- function(percent_with_effect, effect_size, lfcThreshold, num_replica
               median_p_negative = median(padj[!significant], na.rm = TRUE),
               median_p_fn = median(padj[FN], na.rm = TRUE)
               ) %>%
-    mutate(percent_with_effect = percent_with_effect, effect_size = effect_size, lfcThreshold = lfcThreshold)
+    mutate(num_replicates = num_replicates, percent_with_effect = percent_with_effect, effect_size = effect_size, lfcThreshold = lfcThreshold)
   stats
   #data.frame(true = sim_data$true$coefficients[,2], estimated = res$baseMean) %>% filter(true != 0 & estimated != 0) %>% mutate(estimated = log(estimated)) %>% ggplot(aes(x=true, y = estimated)) + geom_point()
   
@@ -68,11 +69,12 @@ What are the basic statistics when 20% genes is either up or down regulated as a
 set.seed(6521475)
 num_simulations = 100
 results_base_list <- list()
-i = 1
-for(lfcThreshold in c(0, 2, 3)) {
-  for(effect_size in c(0,3,4,6)) {
-    results_base_list[[i]] <- deSeqTest(0.2, effect_size = effect_size, lfcThreshold = lfcThreshold, num_simulations = num_simulations)
-    i <- i + 1
+j = 1
+inputs <- data.frame(effect_size = c(0,3,3,6,6), lfcThreshold = c(0, 0, 1.5, 0, 1.5))
+for(num_replicates in c(3:5,10)) {
+  for(i in 1:nrow(inputs)) {
+    results_base_list[[j]] <- deSeqTest(0.2, effect_size = inputs$effect_size[i], lfcThreshold = inputs$lfcThreshold[i], num_simulations = num_simulations, num_replicates = num_replicates)
+    j <- j + 1
   }
 }
 results_base <- do.call(rbind, results_base_list)
@@ -82,16 +84,16 @@ results_base <- do.call(rbind, results_base_list)
 avg_func <- function(x) { mean(x, na.rm  = TRUE)}
 
 
-results_base %>% group_by(effect_size, lfcThreshold) %>% 
+results_base %>% group_by(num_replicates, effect_size, lfcThreshold) %>% 
   summarise(
             TP = avg_func(TP_), 
             TN = avg_func(TN_), 
             FP = avg_func(FP_), 
             FN = avg_func(FN_), 
             S_error = avg_func(S_error_)
-  )
+  ) 
 
-results_base %>% group_by(effect_size, lfcThreshold) %>% 
+results_base %>% group_by(num_replicates, effect_size, lfcThreshold) %>% 
   summarise(
             FDR = avg_func(FP_ / (FP_ + TP_)),
             true_eff = avg_func(mean_true_eff),
@@ -142,16 +144,17 @@ deseq_replication <- function(percent_with_effect, effect_size, lfcThreshold, nu
 
 ```{r, warning="hide", message="hide"}
 set.seed(1354752)
-num_simulations = 2
+num_simulations = 100
 results_list_repl <- list()
-i = 1
-for(lfcThreshold in c(0, 2)) {
-  for(effect_size in c(4,6)) {
+j = 1
+
+
+inputs <- data.frame(effect_size = c(1.5,3,3,6,6), lfcThreshold = c(1.5,0, 1.5, 0, 1.5))
+for(i in 1:nrow(inputs)) {
     for(sim in 1:num_simulations) {
-      results_list_repl[[i]] <- deseq_replication(0.2, effect_size = effect_size, lfcThreshold = lfcThreshold)
-      i <- i + 1
+      results_list_repl[[j]] <- deseq_replication(0.2, effect_size = inputs$effect_size[i], lfcThreshold = inputs$lfcThreshold[i])
+      j <- j + 1
     }
-  }
 }
 results_repl <- do.call(rbind, results_list_repl)
 ```
@@ -161,6 +164,6 @@ results_repl %>% group_by(effect_size, lfcThreshold) %>%
   summarise( significant = mean(significant_), 
     replicated =  mean(replicated),
     smaller_eff = mean(smaller_eff),
-    smaller_eff_significant = mean(smaller_eff_significant, na.rm = TRUE))
+    smaller_eff_significant = mean(smaller_eff_significant / significant, na.rm = TRUE))
 ```
 
