@@ -1,0 +1,312 @@
+---
+title: "Informed Design of Experiments?"
+subtitle: "With simulations!"
+author: "Martin Modrák"
+date: "2018/06/11"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    css: ["default", "metropolis-fonts", "slides.css" ]
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: true
+---
+
+```{r setup, include=FALSE}
+options(htmltools.dir.version = FALSE)
+library(tidyverse)
+library(knitr)
+library(cowplot)
+library(scales)
+opts_chunk$set(echo = FALSE)
+
+#Colors to be used: https://coolors.co/f2efea-66d7d1-403d58-dea54b-380a30
+```
+
+
+# Scope
+--
+
+1. Design of experiments
+
+--
+
+  * No. of replicates
+
+--
+
+1. Understanding the methods you use
+
+--
+
+1. Case Studies
+
+--
+
+  * t-test
+
+--
+
+  * DESeq2
+
+
+---
+
+* Power analysis
+
+--
+
+  * Hard for non-trivial models
+  
+--
+
+* Simulations easier, but require more assumptions
+  
+--
+
+* Test the whole process
+
+---
+class: inverse, center, middle
+
+# Case Study 1
+
+## Two sample t-test
+
+---
+
+# A Hypothetical Experiment
+
+--
+
+* Amount of product with or w/o chemical in a culture
+
+--
+
+* 5 replicates
+
+--
+
+* Analyze with t-test, significant if $p < 0.05$
+
+--
+* Simulation assumptions
+
+  * The chemical helps a little ( $+2\mu g$ on average)
+
+--
+
+  * Biological variance ( $\mathrm{sd} = 8\mu g$ )
+
+
+---
+
+# Simulations!
+
+
+--
+
+* What do we care about?
+
+--
+
+  * Observed effect size
+
+--
+
+  * How frequently will we claim significance
+  
+--
+
+      * a.k.a. power
+
+--
+
+    * But there's more!
+
+--
+
+* Let's simulate 10000 datasets
+
+
+```{r t_simulate, cache=TRUE}
+set.seed(14682456)
+
+result = data.frame(id = 1:10000, effect = NA, p = NA, lower_confidence = NA)
+true_effect = 2
+sd = 8
+sample_size = 5
+
+for(i in 1:10000) {
+  baseline = rnorm(sample_size, 0, sd)
+  treatment = rnorm(sample_size,  true_effect, sd)
+  test_result = t.test(treatment, baseline)
+  if(test_result$conf.int[2] < 0) {
+    result[i, "lower_confidence"] = test_result$conf.int[2] 
+  } else {
+    result[i, "lower_confidence"] = test_result$conf.int[1] 
+  }
+  result[i, "effect"] = mean(treatment) - mean(baseline)
+  result[i, "p"] = test_result$p.value
+}
+```
+
+---
+
+# What We Observe
+
+```{r t_observed_effects, fig.height = 3, dev='svg', warning=FALSE}
+hist_scale <- scale_x_continuous(limits = c(-20,20))
+large_hist_scale_y <- scale_y_continuous(limits = c(0,1200))
+result %>% ggplot(aes(x = effect)) + geom_histogram(bins = 30) + geom_vline(xintercept = true_effect, color = "blue", size = 2) + hist_scale + large_hist_scale_y 
+```
+
+---
+
+# Filter for Significance
+
+```{r t_filtered_effects, fig.height = 3, dev='svg', warning=FALSE}
+results_sig <- result %>% filter(p < 0.05)  
+
+sig_plot <-  results_sig %>% ggplot(aes(x = effect)) + geom_histogram(bins = 30) + geom_vline(xintercept = true_effect, color = "blue", size = 2)  + hist_scale
+
+sig_plot + large_hist_scale_y
+
+```
+
+--
+
+**Power:**
+```{r t_power}
+cat("p < 0.05 in",mean(result$p < 0.05),"cases")
+```
+
+
+---
+
+# A Closer Look
+
+```{r t_filtered_zoomed, fig.height = 3, dev='svg', warning=FALSE}
+sig_plot <-  results_sig %>% ggplot(aes(x = effect)) + geom_histogram(bins = 30) + geom_vline(xintercept = true_effect, color = "blue", size = 2)  + hist_scale
+
+sig_plot
+
+```
+
+--
+
+**Type S Error** (wrong **S**ign)
+
+--
+
+```{r t_type_s}
+results_sig %>% summarize("Type S error" = mean(effect < 0) %>% percent, "95% CI excludes true" = mean(lower_confidence > true_effect) %>% percent) %>% 
+  kable(format = "html", format.args = )
+```
+
+---
+# A Closer Look
+
+```{r t_filtered_zoomed_2, fig.height = 3, dev='svg', warning = FALSE}
+sig_plot
+```
+
+**Type M Error** (wrong **M**agnitude)
+
+--
+
+```{r t_type_m}
+results_sig %>% filter(effect > 0) %>% summarize("Mean exaggeration" = mean(effect) / true_effect, "Min. exaggeration" = min(effect) / true_effect)  %>% kable(format = "html")
+
+```
+
+
+---
+background-image: url("kangaroo.jpg")
+background-position: 50% 0%
+background-size: 60%
+class: center, bottom
+
+# Significance is Not a Savior!
+
+---
+
+# Impact on the Literature
+
+--
+
+* Published effects are exaggerated
+
+--
+
+  * Exaggeration depends on amount of noise
+  
+--
+
+  * Negligible in high-powered studies
+  
+--
+
+* If a results looks too good given the noise
+--
+ it probably is.
+
+---
+
+# Simulating DESeq2
+
+--
+
+* Where do the counts come from?
+
+---
+
+# Hidden Assumptions
+
+--
+
+* No systematic bias
+
+--
+
+  * Is the experimenter blind to condition?
+  
+--
+
+* All effects equally likely
+
+--
+
+  * With an effect of $5 \sigma$ it is more likely there was an error
+
+---
+
+---
+
+# Take Home 
+
+--
+
+* Worry about Type S & M errors
+
+--
+
+* Simulate experiments before investing money
+
+--
+
+* Simulations may help you understand published research
+
+--
+
+
+.thanks[
+Thanks for your attention!
+]
+
+.footnote[
+Slides created via the R package [**xaringan**](https://github.com/yihui/xaringan).
+
+The chakra comes from [remark.js](https://remarkjs.com), [**knitr**](http://yihui.name/knitr), and [R Markdown](https://rmarkdown.rstudio.com).
+]

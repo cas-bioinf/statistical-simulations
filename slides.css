@@ -1,0 +1,28 @@
+.remark-slide-content {
+  font-size: 25px;
+}
+
+.inverse {
+  background-color: #380a30 ;
+  color: #f2efea;
+}
+
+.footnote {
+  font-size: 60%;
+  right: 3em;
+  text-align: right;
+}
+
+.remark-code, .remark-inline-code {
+    font-size: 100%;
+}
+
+th, td {
+  padding:10px;
+}
+
+.thanks {
+  margin-top:3em;
+  text-align:right;
+  font-weight:bold;
+}
