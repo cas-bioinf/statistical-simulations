@@ -1,5 +1,5 @@
 .remark-slide-content {
-  font-size: 25px;
+  font-size: 160%;
 }
 
 .inverse {
@@ -13,10 +13,6 @@
   text-align: right;
 }
 
-.remark-code, .remark-inline-code {
-    font-size: 100%;
-}
-
 th, td {
   padding:10px;
 }
@@ -25,4 +21,16 @@ th, td {
   margin-top:3em;
   text-align:right;
   font-weight:bold;
+}
+
+a, a > code {
+  color:#00bab0;
+}
+
+.copyright {
+  display: block;
+  position: absolute;
+  bottom: 1em;
+  left: 1em;
+  font-size: 70%;
 }

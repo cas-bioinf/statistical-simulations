@@ -1,6 +1,6 @@
 ---
 title: "Informed Design of Experiments?"
-subtitle: "With simulations!"
+subtitle: ""
 author: "Martin Modrák"
 date: "2018/06/11"
 output:
@@ -12,6 +12,15 @@ output:
       highlightLines: true
       countIncrementalSlides: true
 ---
+background-image:url("enbik_img/matrix.jpg")
+background-position:50% 50%
+class: center bottom inverse
+
+# Simulations!
+
+.copyright[photo by Maurizio Pesce, CC-BY]
+
+---
 
 ```{r setup, include=FALSE}
 options(htmltools.dir.version = FALSE)
@@ -19,20 +28,27 @@ library(tidyverse)
 library(knitr)
 library(cowplot)
 library(scales)
+library(DESeq2)
+library(here)
+library(readr)
+source(here::here("simulateDeSeq2.R"))
+source(here::here("DeSeq2_helpers.R"))
+
 opts_chunk$set(echo = FALSE)
 
 #Colors to be used: https://coolors.co/f2efea-66d7d1-403d58-dea54b-380a30
 ```
 
 
-# Scope
+
+# Why & What
 --
 
 1. Design of experiments
 
 --
 
-  * No. of replicates
+  * No. of replicates, comparison groups, ...
 
 --
 
@@ -52,23 +68,30 @@ opts_chunk$set(echo = FALSE)
 
 
 ---
-
-* Power analysis
+# Power Analysis
 
 --
 
-  * Hard for non-trivial models
+* Simulations:
+
+--
+
+  * Easier
   
 --
 
-* Simulations easier, but require more assumptions
+  * Test the whole process
   
 --
 
-* Test the whole process
+  * More assumptions
 
 ---
-class: inverse, center, middle
+background-image: url("enbik_img/dive_in.jpg")
+background-position: 50% 0%
+class: inverse, center, bottom
+
+--
 
 # Case Study 1
 
@@ -80,7 +103,11 @@ class: inverse, center, middle
 
 --
 
-* Amount of product with or w/o chemical in a culture
+* Cell culture
+
+--
+
+* Does unoptanium increase midichlorian production?
 
 --
 
@@ -91,39 +118,36 @@ class: inverse, center, middle
 * Analyze with t-test, significant if $p < 0.05$
 
 --
+
 * Simulation assumptions
 
-  * The chemical helps a little ( $+2\mu g$ on average)
+  * Unoptanium helps ( $+2\mu g$ on average)
 
 --
 
-  * Biological variance ( $\mathrm{sd} = 8\mu g$ )
+  * $\mathrm{sd} = 8\mu g$
 
 
 ---
 
-# Simulations!
 
-
---
-
-* What do we care about?
+# What do we care about?
 
 --
 
-  * Observed effect size
+* Observed effect size
 
 --
 
-  * How frequently will we claim significance
+* How frequently will we claim significance
   
 --
 
-      * a.k.a. power
+  * a.k.a. power
 
 --
 
-    * But there's more!
+  * But there's more!
 
 --
 
@@ -151,6 +175,11 @@ for(i in 1:10000) {
   result[i, "p"] = test_result$p.value
 }
 ```
+
+---
+background-image: url("enbik_img/what_could_go_wrong.jpg")
+background-position: 50% 0%
+background-size: cover
 
 ---
 
@@ -217,13 +246,13 @@ sig_plot
 --
 
 ```{r t_type_m}
-results_sig %>% filter(effect > 0) %>% summarize("Mean exaggeration" = mean(effect) / true_effect, "Min. exaggeration" = min(effect) / true_effect)  %>% kable(format = "html")
+results_sig %>% filter(effect > 0) %>% summarize("Mean exaggeration" = mean(effect) / true_effect, "Min. exaggeration" = min(effect) / true_effect)  %>% kable(format = "html", digits = 1)
 
 ```
 
 
 ---
-background-image: url("kangaroo.jpg")
+background-image: url("enbik_img/kangaroo.jpg")
 background-position: 50% 0%
 background-size: 60%
 class: center, bottom
@@ -253,36 +282,161 @@ class: center, bottom
  it probably is.
 
 ---
+background-image: url("enbik_img/challenge.jpg")
+background-position: 50% 0%
+class: center, bottom
+
+.copyright[photo by Llann Wé, CC-BY]
+
+--
+
+# Case Study 2
+
+## Differential Expression (DESeq2)
+
+---
+
+# Less Hypothetical Experiment
+
+--
+
+* Differential expression upon unoptanium stress
+
+--
+
+* Control, treatment, 3 replicates each
+
+--
+
+* 1000 genes
+
+--
+
+* We use DESeq2 to test for effect = $|log_2(fc)| > 1$
+
+---
 
 # Simulating DESeq2
 
 --
 
-* Where do the counts come from?
-
----
-
-# Hidden Assumptions
+* Where do the read counts come from?
 
 --
 
-* No systematic bias
-
---
-
-  * Is the experimenter blind to condition?
+  * From a previous experiment
   
 --
 
-* All effects equally likely
+* How to set $log_2(fc)$ ?
 
 --
 
-  * With an effect of $5 \sigma$ it is more likely there was an error
+  * 80% genes have $log_2(fc) = 0$
+  
+--
+
+  * 0, 2, 4 and 6 for the other 20%
+  
+--
+
+* 100 simulations each
+
+
+---
+# Some results
+
+```{r DE_simulate, warning=FALSE, message=FALSE, results="hide", cache = TRUE}
+set.seed(79314522)
+inputs <- data.frame(num_replicates = c(3,3,3,3), effect_size = c(0,2,4,6), lfcThreshold = c(1,1, 1, 1))
+results_base <- deSeqMultiTest(inputs, num_simulations = 100)
+```
+
+
+```{r DE_results_1}
+avg_func <- function(x) { mean(x, na.rm  = TRUE)}
+
+default_presentation_transform <- function(x) {
+  x %>% ungroup() %>% 
+    dplyr::rename(log_fc = effect_size) %>%
+    select(-num_replicates, -lfcThreshold) %>% 
+    kable(format = "html",digits = 1)
+}
+
+show_DeSeq_results <- function(results_base) {
+  results_base %>% group_by(num_replicates, effect_size, lfcThreshold) %>% 
+    summarise(
+              "True Pos." = avg_func(TP_), 
+              "False Pos." = avg_func(FP_), 
+              "Type S error" = avg_func(S_error_),
+              #FDR = avg_func(FP_ / (FP_ + TP_)),
+              #"Median exaggeration" = median(mean_true_eff_shrunk, na.rm = TRUE),
+              "Mean exaggeration" = avg_func(mean_true_eff / effect_size),
+              "Mean shrunk exaggeration" = avg_func(mean_true_eff_shrunk / effect_size) 
+    ) %>%     
+    default_presentation_transform()
+}
+
+show_DeSeq_results(results_base)
+
+
+```
+
+We tested for $|log_2(fc)| > 1$
 
 ---
 
+# Replicating DeSeq2 results
+
+--
+
+* Exact experiment replication (3 replicates each)
+
+--
+
+* Replicated = significant in both
+
 ---
+
+# Replication results
+
+```{r DE_replication_simulate, warning=FALSE, message=FALSE, results = "hide", cache = TRUE}
+set.seed(324588)
+inputs_repl <- data.frame(effect_size = c(2,4,6), lfcThreshold = c(1, 1, 1))
+results_repl <- deseq_replication_multi(inputs_repl, num_simulations = 100)
+```
+
+```{r DE_replication_show}
+results_repl %>% group_by(num_replicates, effect_size, lfcThreshold) %>%
+  summarise("Significant 1st experiment" = mean(significant_), 
+    Replicated =  mean(replicated),
+    #"Smaller effect" = mean(smaller_eff, na.rm = TRUE) / 1000,
+    "Smaller effect - significant" =  sum(smaller_eff_significant, na.rm = TRUE) / sum(significant_, na.rm = TRUE)
+  ) %>%
+  default_presentation_transform()
+
+```
+
+---
+
+# DESeq2 Summary
+
+--
+
+* DE experiments have low power
+
+--
+
+* DESeq2 rocks!
+
+--
+
+* DESeq2 avoids false positives at all costs
+--
+ -> high false negatives
+
+---
+class:inverse
 
 # Take Home 
 
@@ -296,17 +450,32 @@ class: center, bottom
 
 --
 
-* Simulations may help you understand published research
+* Simulate to understand published research
 
 --
 
+* Code available at https://github.com/cas-bioinf/statistical-simulations
+
+--
 
 .thanks[
 Thanks for your attention!
 ]
 
-.footnote[
-Slides created via the R package [**xaringan**](https://github.com/yihui/xaringan).
 
-The chakra comes from [remark.js](https://remarkjs.com), [**knitr**](http://yihui.name/knitr), and [R Markdown](https://rmarkdown.rstudio.com).
-]
+---
+
+# What about 6 replicates?
+
+```{r DE_simulate_2, warning=FALSE, message=FALSE, results="hide", cache = TRUE}
+set.seed(578195214)
+inputs2 <- data.frame(num_replicates = c(6,6,6,6), effect_size = c(0,2,4,6), lfcThreshold = c(1, 1, 1, 1))
+results_base2 <- deSeqMultiTest(inputs2, num_simulations = 100)
+```
+
+```{r DE_results_2}
+show_DeSeq_results(results_base2)
+```
+
+We tested for $|log_2(fc)| > 1$
+
