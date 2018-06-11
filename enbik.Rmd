@@ -91,6 +91,10 @@ background-image: url("enbik_img/dive_in.jpg")
 background-position: 50% 0%
 class: inverse, center, bottom
 
+
+.copyright[photo: U.S. government work]
+
+
 --
 
 # Case Study 1
@@ -180,6 +184,8 @@ for(i in 1:10000) {
 background-image: url("enbik_img/what_could_go_wrong.jpg")
 background-position: 50% 0%
 background-size: cover
+
+.copyright[photo: U.S. government work]
 
 ---
 
