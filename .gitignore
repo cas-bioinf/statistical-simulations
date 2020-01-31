@@ -36,3 +36,4 @@ vignettes/*.pdf
 *.nb.html
 
 libs/
+local_temp_data/
