@@ -14,18 +14,41 @@ output_dir <- here::here("local_temp_data")
 if(!dir.exists(output_dir)) {
   dir.create(output_dir)
 }
+options(mc.cores = parallel::detectCores())
 ```
 
-```{r, fig.width = 2, fig.height = 5}
-set.seed(984626454)
-batches <- c("A","B","C")
-base_data <- tibble(batch = batches, offset = rnorm(3, 0, 3)) %>% 
-  crossing(tibble(replicate = 1:4)) %>%
-  mutate(relative_expression = exp(0.2 * (offset + rnorm(n(), 0, 1))))
+```{r, fig.width = 3, fig.height = 5}
+set.seed(842223)
+batches <- c("A","B", "C")
+base_data <- tibble(batch = batches, var_intercept = c(0.1, 0, -0.1), var_effect = rnorm(length(batches), 0, 0.1)) %>% 
+  crossing(tibble(group = c("control", "treatment"), b = c(0, 1))) %>%
+  crossing(tibble(replicate = 1:3)) %>%
+  #filter(batch == "A" | replicate < 3) %>%
+  mutate(log_relative_expression = var_intercept + b* (0.25) + rnorm(n(), 0, 0.25), 
+         relative_expression = exp(log_relative_expression))
 
-my_point <- geom_point( position = position_jitter(width = 0.05), color = "#c46e9b", fill = "#f49ac8", size = 4, shape = 21)
+base_plot <- function(data) {
+  set.seed(9882264) #Force seed to maintain identical jitter
+  data %>% 
+    ggplot(aes(x = group, y = log_relative_expression, color = group, fill = group)) +
+    scale_y_continuous("Log(Relative expression)") +
+    # ggplot(aes(x = group, y = log_relative_expression, color = group, fill = group)) + 
+    # scale_y_continuous("Log(Relative expression)") +
+    theme(axis.title.x = element_blank())
+}
 
-add_error_bars <- function(plot, nudge = -0.2, width = 0.2) {
+add_my_point <- function(plot) {
+  plot + 
+    geom_point( position = position_jitter(width = 0.05), size = 4, shape = 21) +
+    scale_color_manual(values = c("#c46e9b","#05a8aa"), guide = FALSE) + 
+    scale_fill_manual(values = c("#f49ac8", "#5fc7c8"), guide = FALSE)
+}
+
+mean_se_log <- function(x) {
+  exp(mean_se(log(x)))
+}
+
+add_error_bars <- function(plot, nudge = -0.3, width = 0.2) {
   position = position_nudge(x = nudge)
   plot +   
     stat_summary(fun.data = "mean_se", geom = "errorbar", width = width, color = "#707070", position = position) + 
@@ -33,75 +56,83 @@ add_error_bars <- function(plot, nudge = -0.2, width = 0.2) {
 }
 
 plot_together_points <- base_data %>% 
-  ggplot(aes(x = "All", y = relative_expression)) +
-  my_point + scale_y_continuous("Relative expression") + 
-  theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+  base_plot() %>%
+  add_my_point()
 
 plot_together_points
-ggsave(paste0(output_dir, "/together_points.png"), plot_together_points, width = 2, height = 5)
+ggsave(paste0(output_dir, "/together_points.png"), plot_together_points, width = 3, height = 5)
 
-plot_together <- base_data %>% 
-  ggplot(aes(x = "All", y = relative_expression)) %>%
-  add_error_bars() +
-  my_point + scale_y_continuous("Relative expression") + 
-  theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+plot_together <- base_data  %>%
+  base_plot() %>%
+  add_error_bars() %>%
+  add_my_point()
 
 plot_together
-ggsave(paste0(output_dir, "/together.png"), plot_together, width = 2, height = 5)
+ggsave(paste0(output_dir, "/together.png"), plot_together, width = 3, height = 5)
 ```
 
-```{r, fig.width = 4.5, fig.height = 5}
-plot_separate <- base_data %>% ggplot(aes(x = batch, y = relative_expression)) %>%
-  add_error_bars() + my_point +
-  scale_y_continuous("Relative expression") + scale_x_discrete("Batch")
+```{r, fig.width = 6, fig.height = 5}
+plot_separate <- base_data %>% base_plot() %>%
+  add_error_bars() %>% add_my_point() +
+  facet_wrap(~batch)
 
 plot_separate
-ggsave(paste0(output_dir, "/separate.png"), plot_separate, width = 4.5, height = 5)
+ggsave(paste0(output_dir, "/separate.png"), plot_separate, width = 6, height = 5)
 ```
 
 ```{r}
-fit <- stan_lmer(relative_expression ~ 1 + (1 | batch), data = base_data)
+fit <- stan_lmer(log_relative_expression ~ 1 + group + (1 | batch), data = base_data)
 ```
 
 ```{r}
-summary(fit)
+summary(fit, probs = c(0.025,0.5, 0.975))
 ```
 
 ```{r}
-s <- posterior_linpred(fit, newdata = tibble(batch = batches))
-batch_means <- colMeans(s)
-batch_sd <- sqrt(diag(cov(s)))
-fit_to_plot <- tibble(batch = batches, mean = batch_means, sd = batch_sd)
+t.test(log_relative_expression ~ group, data = base_data)
+car::Anova(lm(log_relative_expression ~ batch + group, data = base_data))
+mean(as.array(fit)[,,"grouptreatment"] < 0)
 
 ```
 
-```{r, fig.width = 4.5, fig.height = 5}
 
-my_crossbar <- function(crossbar_data) { 
-  geom_crossbar(aes(y = mean, ymin = mean - sd, ymax = mean + sd), data = crossbar_data, color = "#05a8aa", width = 0.2, size = 2, position = position_nudge(x = 0.2)) 
+```{r}
+predict_data <- tibble(batch = batches) %>% crossing(group = unique(base_data$group))
+s <- posterior_linpred(fit, newdata = predict_data)
+fit_to_plot <- predict_data %>% mutate(log_mean = colMeans(s), mean = exp(log_mean), sd = sqrt(diag(cov(s))), low = log_mean - sd, high = log_mean + sd)
+fit_to_plot
+```
+
+```{r, fig.width = 6, fig.height = 5}
+
+add_my_crossbar <- function(plot, crossbar_data) { 
+  plot + geom_crossbar(aes(y = log_mean, ymin = low, ymax = high), data = crossbar_data, color = "#5d2e8c", fill = "white", width = 0.2, size = 2, position = position_nudge(x = 0.3)) 
 }
 
-plot_multilevel <- base_data %>% ggplot(aes(x = batch, y = relative_expression)) %>% 
-  add_error_bars(nudge = -0.2, width = 0.2) +
-  my_crossbar(fit_to_plot) + my_point +
-  scale_y_continuous("Relative expression") + scale_x_discrete("Batch")
+plot_multilevel <- base_data %>% base_plot() %>% 
+  add_error_bars() %>%
+  add_my_crossbar(fit_to_plot)  %>% add_my_point() + facet_wrap(~batch)
+  
 
 plot_multilevel
-ggsave(paste0(output_dir, "/separate_multilevel.png"), plot_multilevel, width = 4.5, height = 5)
+ggsave(paste0(output_dir, "/separate_multilevel.png"), plot_multilevel, width = 6, height = 5)
 ```
 
-```{r, fig.width=2, fig.height=5}
-intercept_info <- summary(fit)["(Intercept)",, drop = FALSE] %>% as_tibble()
+```{r, fig.width=3, fig.height=5}
+predict_data_new_level <- tibble(group = unique(base_data$group), batch = "NEW_BATCH")
 
-plot_multilevel_intercept <- base_data %>% ggplot(aes(x = "All", y = relative_expression)) %>% 
-  add_error_bars() +
-  my_crossbar(intercept_info)  + 
-  my_point +
-  scale_y_continuous("Relative expression") + scale_x_discrete("Batch") +
-  theme(axis.title.x = element_blank(), axis.text.x = element_blank())
+s_n <- posterior_linpred(fit, newdata = predict_data_new_level)
+fit_to_plot_n <- predict_data_new_level %>% mutate(log_mean = colMeans(s_n), mean = exp(log_mean), sd = sqrt(diag(cov(s_n))), low = log_mean - sd, high = log_mean + sd)
+
+
+plot_multilevel_intercept <- base_data %>% base_plot() %>%
+  add_error_bars() %>%
+  add_my_crossbar(fit_to_plot_n)  %>%
+  add_my_point()
+
 
 
 plot_multilevel_intercept
-ggsave(paste0(output_dir, "/separate_together.png"), plot_multilevel_intercept, width = 2, height = 5)
+ggsave(paste0(output_dir, "/separate_together.png"), plot_multilevel_intercept, width = 3, height = 5)
 ```
 
