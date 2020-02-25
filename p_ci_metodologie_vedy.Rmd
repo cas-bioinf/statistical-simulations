@@ -1,0 +1,43 @@
+---
+title: "P-values, CI"
+output: html_notebook
+---
+
+https://cs.wikipedia.org/wiki/R%C5%AFst_%C4%8Dlov%C4%9Bka#Sekul%C3%A1rn%C3%AD_trend
+Podle poslední reprezentativní národní růstové studie z roku 2016 měří v 18 letech český chlapec s ukončeným růstem v průměru 186 cm a česká dívka 172 cm, směrodatná odchylka dospělé tělesné výšky (standardní deviace - SD) je 8 cm
+
+```{r setup}
+library(tidyverse)
+library(cowplot)
+theme_set(theme_cowplot())
+sd_cm <- 8
+rozdil_pohlavi <- 186 - 172
+rozdil_pohlavi_relativne <- rozdil_pohlavi / sd_cm
+
+n_sims <- 1000
+```
+
+P hodnoty dle velikosti efektu
+
+```{r}
+n_vzorku <- 30
+velikost_efektu <- tibble(efekt = c(0, 0.1, 0.5, rozdil_pohlavi_relativne))
+
+single_p_sim <- function(data_row) {
+  control <- rnorm(n_vzorku, 0, 1)
+  treatment <- rnorm(n_vzorku, data_row$efekt, 1)
+  test_res <- t.test(control, treatment)
+  
+  cbind(data_row, tibble(p = test_res$p.value, rozdil = mean(treatment) - mean(control)))
+}
+
+p_velikost_efektu <- velikost_efektu %>% crossing(sim = 1:n_sims) %>%
+  transpose() %>%
+  map_df(single_p_sim)
+
+p_velikost_efektu %>% ggplot(aes(x = p)) + geom_histogram(binwidth = 0.05) + facet_wrap(~efekt, scales = "free_y")
+p_velikost_efektu %>% ggplot(aes(x = p, fill = rozdil > 0, group = rozdil > 0)) + geom_histogram(binwidth = 0.05) + facet_wrap(~efekt, scales = "free_y")
+
+
+```
+
