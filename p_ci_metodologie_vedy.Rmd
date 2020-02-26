@@ -3,16 +3,17 @@ title: "P-values, CI"
 output: html_notebook
 ---
 
-https://cs.wikipedia.org/wiki/R%C5%AFst_%C4%8Dlov%C4%9Bka#Sekul%C3%A1rn%C3%AD_trend
-Podle poslední reprezentativní národní růstové studie z roku 2016 měří v 18 letech český chlapec s ukončeným růstem v průměru 186 cm a česká dívka 172 cm, směrodatná odchylka dospělé tělesné výšky (standardní deviace - SD) je 8 cm
+From Cochrane: https://www.cochranelibrary.com/cdsr/doi/10.1002/14651858.CD003823.pub2/full
+Baseline systolic BP 157.1. SD of change in SBP was 13.9. Mean placebo effect -3.2. The best estimate of the near maximal blood pressure lowering (difference from placebo) for the ACE inhibitor class of drugs is -7.68 (95% CI -8.45, -6.91).
+Weighted mean SD of SBP: 16.6 (table 3)
 
 ```{r setup}
 library(tidyverse)
 library(cowplot)
 theme_set(theme_cowplot())
-sd_cm <- 8
-rozdil_pohlavi <- 186 - 172
-rozdil_pohlavi_relativne <- rozdil_pohlavi / sd_cm
+
+sbp_sd <- 16.6
+effect_ace_minus_placebo <- -7.68
 
 n_sims <- 1000
 ```
@@ -20,24 +21,166 @@ n_sims <- 1000
 P hodnoty dle velikosti efektu
 
 ```{r}
-n_vzorku <- 30
-velikost_efektu <- tibble(efekt = c(0, 0.1, 0.5, rozdil_pohlavi_relativne))
+velikost_efektu <- tibble(efekt = c(0, -5 / sbp_sd, effect_ace_minus_placebo / sbp_sd, -1))
+n_vzorku <- tibble(n = c(15, 30, 60, 120))
+#n_vzorku <- tibble(n = seq(sqrt(15), sqrt(120), length.out = 4) ^ 2 %>% round())
 
 single_p_sim <- function(data_row) {
-  control <- rnorm(n_vzorku, 0, 1)
-  treatment <- rnorm(n_vzorku, data_row$efekt, 1)
+  control <- rnorm(data_row$n, 0, 1)
+  treatment <- rnorm(data_row$n, data_row$efekt, 1)
   test_res <- t.test(control, treatment)
   
-  cbind(data_row, tibble(p = test_res$p.value, rozdil = mean(treatment) - mean(control)))
+  cbind(data_row, tibble(p = test_res$p.value, zmereny_rozdil = mean(treatment) - mean(control)))
 }
 
-p_velikost_efektu <- velikost_efektu %>% crossing(sim = 1:n_sims) %>%
+p_velikost_efektu <- velikost_efektu %>% 
+  crossing(n_vzorku) %>%
+  crossing(sim = 1:n_sims) %>%
   transpose() %>%
-  map_df(single_p_sim)
+  map_df(single_p_sim) %>%
+  mutate(druh_rozdilu = factor(zmereny_rozdil > 0, levels = c(TRUE, FALSE), labels = c("Pozitivní", "Negativní")),
+         efekt_f = factor(efekt, levels = velikost_efektu$efekt))
 
-p_velikost_efektu %>% ggplot(aes(x = p)) + geom_histogram(binwidth = 0.05) + facet_wrap(~efekt, scales = "free_y")
-p_velikost_efektu %>% ggplot(aes(x = p, fill = rozdil > 0, group = rozdil > 0)) + geom_histogram(binwidth = 0.05) + facet_wrap(~efekt, scales = "free_y")
+
+```
+
+```{r}
+plots <- list()
+widths <- list()
+```
 
 
+```{r}
+hg_sd_label <- function(sd_val) {
+  numeric_sd_val <- sd_val %>% as.numeric()
+  paste0("Rozdíl: ", round(sbp_sd * numeric_sd_val, 1), " mmHg (", abs(round(numeric_sd_val, 2)), " sd)")
+}
+
+
+facet_efekt <- facet_wrap(~efekt_f, scales = "free_y", labeller = labeller(efekt_f = hg_sd_label))
+
+
+scale_pocet <- scale_y_continuous(labels = function(x) { scales::percent(x / n_sims, accuracy = 1)}, trans = scales::trans_new("Relative", transform = function(x) { x / n_sims}, inverse = function(x) { x * n_sims}))
+
+p_breaks <- seq(0,1, by = 0.05)
+n_first_plot <- n_vzorku$n[2]
+
+plots$p_fixini_n_prvni <- p_velikost_efektu %>% filter(n == n_first_plot) %>% 
+  ggplot(aes(x = p, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) +  
+  scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
+  scale_pocet + facet_efekt + ggtitle(paste0("N: ", n_first_plot))
+plots$p_fixini_n_prvni
+
+for(n_k_zobrazeni in n_vzorku$n) {
+  plot_name <- paste0("p_fixni_n_", n_k_zobrazeni)
+  plots[[plot_name]] <- p_velikost_efektu %>% filter(n == n_k_zobrazeni) %>% ggplot(aes(x = p, fill = druh_rozdilu, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) + 
+      scale_pocet + facet_efekt + scale_fill_discrete("Změřený rozdíl") +
+      scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
+      ggtitle(paste0("N: ", n_k_zobrazeni))
+  print(plots[[plot_name]])
+}
+
+
+for(efekt_k_zobrazeni in velikost_efektu$efekt) {
+  plot_name <- paste0("p_fixni_efekt_", round(efekt_k_zobrazeni,2))
+  plots[[plot_name]] <- p_velikost_efektu %>% filter(efekt == efekt_k_zobrazeni) %>% ggplot(aes(x = p, fill = druh_rozdilu, alpha = p < 0.05)) + 
+      geom_histogram(breaks = p_breaks) + facet_wrap(~n, labeller = label_both, scales = "free_y") + 
+      scale_fill_discrete("Změřený rozdíl") + scale_pocet +
+      scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
+      ggtitle(hg_sd_label(efekt_k_zobrazeni))
+  print(plots[[plot_name]])
+}
+
+
+```
+
+```{r}
+power.t.test(delta = effect_ace_minus_placebo, sd = sbp_sd, sig.level = 0.05, power = 0.8)
+```
+
+```{r}
+efekty <- velikost_efektu$efekt[c(2,3)]
+nka <- n_vzorku$n[c(2,4)]
+for(i in 1:length(efekty) ) {
+  n_k_zobrazeni <- nka[i]
+  efekt_k_zobrazeni <- efekty[i]
+  plot_name <- paste0("m_and_s_error_",n_k_zobrazeni,"_eff_", round(abs(efekt_k_zobrazeni),2))
+  plots[[plot_name]] <- p_velikost_efektu %>% filter(n == n_k_zobrazeni, efekt == efekt_k_zobrazeni, p < 0.05) %>%
+    ggplot(aes(x = zmereny_rozdil * sbp_sd)) + geom_histogram(aes(y = stat(width*density)), binwidth = 1)  + geom_vline(xintercept = efekt_k_zobrazeni * sbp_sd, color = "blue", size = 2, linetype = "dashed") + 
+    facet_efekt + scale_y_continuous("Podíl", labels = scales::percent) + scale_x_continuous("Změřený rozdíl [mmHg]") +
+    ggtitle(paste0("Pouze p < 0.05, N: ", n_k_zobrazeni))
+  print(plots[[plot_name]])
+  
+  widths[[plot_name]] <- 6
+}
+```
+
+
+# Více studií
+
+```{r}
+n_studii <- 8
+n_vice_studii <- 30
+studie_df_raw <- list()
+next_id <- 1
+efekty_pro_vice_studii <- c(0, velikost_efektu$efekt[3])
+for(efekt_pro_simulace in efekty_pro_vice_studii) {
+  p_pro_sim <- p_velikost_efektu %>% filter(n == n_vice_studii, efekt == efekt_pro_simulace)
+  for(i in 1:n_sims) {
+    studie_df_raw[[next_id]] <- p_pro_sim %>% sample_n(n_studii) %>% 
+      group_by(n, efekt, efekt_f) %>%
+      summarise(min.p = min(p), max.p = max(p), min.zmereny_rozdil = min(zmereny_rozdil), max.zmereny_rozdil = max(zmereny_rozdil))
+      #summarise(min.p = min(p), max.p = max(p), min.zmereny_rozdil = min(c(Inf,zmereny_rozdil[p < 0.05])), max.zmereny_rozdil = max(c(-Inf,zmereny_rozdil[p < 0.05])))
+    next_id <- next_id + 1
+  }
+}
+
+p_vice_studii <- do.call(rbind, studie_df_raw)
+
+p_vice_studii_long <- p_vice_studii %>%
+      pivot_longer(c("min.p","max.p","min.zmereny_rozdil","max.zmereny_rozdil"), names_to = c("typ","meritko"), names_sep = "\\.", values_to = "hodnota") 
+
+```
+
+```{r}
+for(efekt_k_zobrazeni in efekty_pro_vice_studii) {
+  plot_name_base <- paste0("vice_studii_", abs(round(efekt_k_zobrazeni,2)),"_")
+  title <- ggtitle(paste0(n_studii, " studií, N: ", n_vice_studii))
+  
+  plot_name_p <- paste0(plot_name_base, "_p")
+  plots[[plot_name_p]] <- p_vice_studii_long %>% filter(meritko == "p", efekt == efekt_k_zobrazeni) %>%
+      ggplot(aes(x = hodnota, color = typ)) + geom_freqpoly(breaks = p_breaks) + scale_pocet + facet_efekt + title +
+      geom_vline(xintercept = 0.05, color = "green", size = 2, linetype = "dashed") +
+    scale_x_continuous("p-hodnota")
+  widths[[plot_name_p]] <- 6
+  print(plots[[plot_name_p]])
+
+  plot_name_zmereny <- paste0(plot_name_base, "_zmereny_rozdil")
+  plots[[plot_name_zmereny]] <- p_vice_studii_long %>% filter(meritko == "zmereny_rozdil", efekt == efekt_k_zobrazeni, !is.infinite(hodnota)) %>%
+      ggplot(aes(x = hodnota * sbp_sd, color = typ)) + geom_freqpoly(bins = 10) + scale_pocet + facet_efekt + title +
+    geom_vline(xintercept = efekt_k_zobrazeni * sbp_sd, color = "blue", size = 2, linetype = "dashed") +
+    scale_x_continuous("Změřený rozdíl")
+  widths[[plot_name_zmereny]] <- 6
+  print(plots[[plot_name_zmereny]])
+  
+}
+```
+
+
+
+```{r}
+tmp_dir <- here::here("local_tmp_data")
+if(!dir.exists(tmp_dir)) {
+  dir.create(tmp_dir)
+}
+
+for(plot_name in names(plots)) {
+  if(!is.null(widths[[plot_name]])) {
+    width <- widths[[plot_name]]
+  } else {
+    width <- 8
+  }
+  ggsave(plot = plots[[plot_name]], filename = paste0(tmp_dir,"/",plot_name,".png"), dpi = 300, width = width, height = width * 0.6666666666667)
+}
 ```
 
