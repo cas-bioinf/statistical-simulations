@@ -16,6 +16,11 @@ sbp_sd <- 16.6
 effect_ace_minus_placebo <- -7.68
 
 n_sims <- 1000
+
+plots <- list()
+widths <- list()
+heights <- list()
+
 ```
 
 P hodnoty dle velikosti efektu
@@ -44,10 +49,6 @@ p_velikost_efektu <- velikost_efektu %>%
 
 ```
 
-```{r}
-plots <- list()
-widths <- list()
-```
 
 
 ```{r}
@@ -168,6 +169,118 @@ for(efekt_k_zobrazeni in efekty_pro_vice_studii) {
 
 
 
+TODO radeji fakt simulovat RCT (dve skupiny)
+
+```{r}
+full_population <- rnorm(1e6, effect_ace_minus_placebo, sbp_sd)
+increase_biases <- c(3/2, 4/3, 11/10)
+
+biased_study_population_size <- 1e5
+biased_study_errors <- numeric(n_sims * length(increase_biases))
+for(bias in increase_biases) {
+  full_population_probs <-if_else(full_population < 0, 1, bias)
+  for(i in 1:n_sims) {
+    biased_sample <- sample(full_population, size = biased_study_population_size, replace = TRUE, prob = full_population_probs)
+    biased_study_errors[i] <- (mean(biased_sample) - effect_ace_minus_placebo)^2 
+  }
+}
+  
+rct_results <- data.frame(sample_size = 5 * (2 ^ (0:7))) %>% crossing(sim = 1:n_sims) %>%
+  rowwise() %>%
+  mutate(error = mean(rnorm(sample_size, 0, sbp_sd)) ^ 2) %>%
+  group_by(sample_size) %>%
+  summarise(low_error = sqrt(quantile(error, 0.025)), mean_error = sqrt(mean(error)), high_error = sqrt(quantile(error, 0.975)))
+
+biased_results <- data.frame(low_error = sqrt(quantile(biased_study_errors, 0.025)), mean_error = sqrt(mean(biased_study_errors)), high_error = sqrt(quantile(biased_study_errors, 0.975))) %>% 
+  crossing(data.frame(sample_size = unique(rct_results$sample_size)))
+
+
+```
+
+```{r}
+plots$rct_error <- 
+rct_results %>% ggplot(aes(x = sample_size, y = mean_error))  + #, ymin = low_error, ymax = high_error
+  #geom_ribbon(alpha = 0.3) + 
+  geom_line() + 
+#  geom_ribbon(data = biased_results, fill = "blue", alpha = 0.3) + 
+  scale_y_continuous("Půměrná chyba RCT [mmHg]") +
+  scale_x_continuous("Velikost vzorku RCT")
+
+hline_size <- 2
+pal <- viridisLite::plasma(3)
+
+plots$rct_error_biased <- 
+  plots$rct_error +
+    geom_hline(data = biased_results, aes(yintercept = mean_error), color = pal[2], size = hline_size)
+
+plots$rct_error_biased_decoy <- 
+  plots$rct_error_biased +
+    geom_hline(yintercept = 0.84, color =  pal[1], size = hline_size) +
+    geom_hline(yintercept = 2.53, color =  pal[3], size = hline_size)
+
+```
+
+Láme se to u cca 80 pacientů v RCT
+
+```{r, fig.width= 6, fig.height=5}
+set.seed(56852266)
+data_pohledny <- data.frame(pohledny = rnorm(200), laskavy = rnorm(200))
+
+plot_pohledny <- function(split = "none", trend = FALSE) {
+  
+  if(split == "none") {
+    data_to_plot <- data_pohledny %>% mutate(group = 1)
+    alpha_scale = scale_alpha_continuous(range = c(0.999, 1), guide = FALSE)
+  } else {
+    alpha_scale <- scale_alpha_continuous(range = c(0.2, 1), guide = FALSE)
+    if (split == "up") {
+      data_to_plot <- data_pohledny %>% mutate(group = if_else(pohledny + laskavy > 0, 1, 0))
+    } else if (split == "down") {
+      data_to_plot <- data_pohledny %>% mutate(group = if_else(pohledny + laskavy < 0, 1, 0))
+    }
+  }
+  
+  if(trend) {
+  #  smooth <- geom_smooth(aes(x = pohledny, y = laskavy), inherit.aes = FALSE, data = rbind(data_to_plot %>% filter(group > 0), data.frame(laskavy = 0, pohledny = 0, group = 0)), method = "lm", formula = y ~x)
+    smooth <- geom_smooth(aes(x = pohledny, y = laskavy), inherit.aes = FALSE, data = data_to_plot %>% filter(group > 0), method = "lm", formula = y ~x)
+  } else {
+    smooth <- NULL
+  }
+  data_to_plot %>% 
+    ggplot(aes(x = pohledny, y = laskavy, alpha = group)) + 
+    scale_x_continuous("Pohledný", breaks = c(-1.5, 1.5), labels = c("Málo", "Hodně")) + scale_y_continuous("Laskavý", breaks = c(-1.5, 1.5), labels = c("Málo", "Hodně"))+ 
+    geom_vline(xintercept = 0) + geom_hline(yintercept =  0) + 
+    geom_point(color = viridisLite::plasma(3)[2]) +
+    smooth +
+    alpha_scale +
+    theme(axis.line = element_blank(), axis.ticks = element_blank())
+}
+
+plots$laskavy_pohledny_1 <- plot_pohledny("none")
+plots$laskavy_pohledny_2 <- plot_pohledny("none", TRUE)
+plots$laskavy_pohledny_3 <- plot_pohledny("up")
+plots$laskavy_pohledny_4 <- plot_pohledny("up", TRUE)   
+plots$laskavy_pohledny_5 <- plot_pohledny("down")
+plots$laskavy_pohledny_6 <- plot_pohledny("down", TRUE)
+for(plot_name in paste0("laskavy_pohledny_", 1:6)){
+  print(plots[[plot_name]])
+  widths[[plot_name]] <- 6
+  heights[[plot_name]] <- 5
+}
+```
+
+```{r}
+set.seed(99852665)
+n_obs <- 100
+data_regression_to_the_mean <- data.frame(id = 1:n_obs, before = rnorm(n_obs, mean = 30, sd = 2), after = rnorm(n_obs, mean = 30, sd = 2)) %>% mutate(selected = as.numeric(before > 32), improved = before > after) %>%
+  pivot_longer(c("before", "after"),names_to = "group", values_to = "BMI") %>%
+  mutate(group = factor(group, levels = c("before","after")))
+
+data_regression_to_the_mean %>% ggplot(aes(x = group,y = BMI, alpha = selected, color = improved, group = id)) + geom_line() + geom_point() + scale_alpha(range = c(0.2, 1), guide = FALSE) 
+
+```
+
+
 ```{r}
 tmp_dir <- here::here("local_tmp_data")
 if(!dir.exists(tmp_dir)) {
@@ -180,7 +293,11 @@ for(plot_name in names(plots)) {
   } else {
     width <- 8
   }
-  ggsave(plot = plots[[plot_name]], filename = paste0(tmp_dir,"/",plot_name,".png"), dpi = 300, width = width, height = width * 0.6666666666667)
+  if(!is.null(heights[[plot_name]])) {
+    height <- heights[[plot_name]]
+  } else {
+    height <- width * 0.6666666666667
+  }
+  ggsave(plot = plots[[plot_name]], filename = paste0(tmp_dir,"/",plot_name,".png"), dpi = 300, width = width, height = height)
 }
 ```
-
