@@ -272,11 +272,19 @@ for(plot_name in paste0("laskavy_pohledny_", 1:6)){
 ```{r}
 set.seed(99852665)
 n_obs <- 100
-data_regression_to_the_mean <- data.frame(id = 1:n_obs, before = rnorm(n_obs, mean = 30, sd = 2), after = rnorm(n_obs, mean = 30, sd = 2)) %>% mutate(selected = as.numeric(before > 32), improved = before > after) %>%
+data_regression_to_the_mean <- data.frame(id = 1:n_obs, before = rnorm(n_obs, mean = 30, sd = 2), after = rnorm(n_obs, mean = 30, sd = 2)) %>% mutate(selected = as.numeric(before > 32), improved = factor(before > after, levels = c(TRUE, FALSE), labels = c("Ano","Ne"))) %>%
   pivot_longer(c("before", "after"),names_to = "group", values_to = "BMI") %>%
-  mutate(group = factor(group, levels = c("before","after")))
+  mutate(group = factor(group, levels = c("before","after"), labels = c("Před zásahem", "Po zásahu")))
 
-data_regression_to_the_mean %>% ggplot(aes(x = group,y = BMI, alpha = selected, color = improved, group = id)) + geom_line() + geom_point() + scale_alpha(range = c(0.2, 1), guide = FALSE) 
+base_rtm_plot <- data_regression_to_the_mean %>% ggplot(aes(x = group,y = BMI, alpha = selected, color = improved, group = id)) + geom_line() + geom_point() + scale_x_discrete("Skupina") + scale_color_discrete("Snížení BMI")
+
+plots$regression_to_the_mean <- base_rtm_plot + scale_alpha(range = c(0.9999, 1), guide = FALSE)
+plots$regression_to_the_mean 
+
+plots$regression_to_the_mean_highlight <- base_rtm_plot + scale_alpha(range = c(0.2, 1), guide = FALSE) 
+plots$regression_to_the_mean_highlight 
+
+
 
 ```
 
