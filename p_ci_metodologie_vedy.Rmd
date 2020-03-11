@@ -12,6 +12,7 @@ library(tidyverse)
 library(cowplot)
 theme_set(theme_cowplot())
 
+sbp_baseline <- 157.1
 sbp_sd <- 16.6
 effect_ace_minus_placebo <- -7.68
 
@@ -58,20 +59,41 @@ hg_sd_label <- function(sd_val) {
 }
 
 
-facet_efekt <- facet_wrap(~efekt_f, scales = "free_y", labeller = labeller(efekt_f = hg_sd_label))
+facet_efekt <- facet_wrap(~efekt_f, scales = "free", labeller = labeller(efekt_f = hg_sd_label))
 
-
-scale_pocet <- scale_y_continuous(labels = function(x) { scales::percent(x / n_sims, accuracy = 1)}, trans = scales::trans_new("Relative", transform = function(x) { x / n_sims}, inverse = function(x) { x * n_sims}))
+make_scale_pocet <- function(n_sims) {
+  scale_y_continuous("Frekvence", labels = function(x) { scales::percent(x / n_sims, accuracy = 1)}, trans = scales::trans_new("Relative", transform = function(x) { x / n_sims}, inverse = function(x) { x * n_sims}))
+}
+scale_pocet <- make_scale_pocet(n_sims)
 
 p_breaks <- seq(0,1, by = 0.05)
 n_first_plot <- n_vzorku$n[2]
 
-plots$p_fixini_n_prvni <- p_velikost_efektu %>% filter(n == n_first_plot) %>% 
-  ggplot(aes(x = p, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) +  
-  scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
-  scale_pocet + facet_efekt + ggtitle(paste0("N: ", n_first_plot))
-plots$p_fixini_n_prvni
+for(kolik_zobrazit in c(1, 2, 3, 10, 50, n_sims)) {
+  plot_name <- paste0("p_tutorial_histogram_", kolik_zobrazit)
+  plots[[plot_name]] <- p_velikost_efektu %>% 
+    filter(n == n_first_plot, efekt == 0) %>% 
+    head(n = kolik_zobrazit) %>%
+    ggplot(aes(x = p)) + geom_histogram(breaks = p_breaks) +  
+    make_scale_pocet(kolik_zobrazit) 
+  print(plots[[plot_name]])
+  
+}
 
+plots$p_fixni_efekt_prvni <- p_velikost_efektu %>% 
+    filter(n == n_first_plot) %>% 
+    ggplot(aes(x = p, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) +  
+    scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
+    scale_pocet + facet_efekt + ggtitle(paste0("N: ", n_first_plot))
+plots$p_fixni_efekt_prvni
+
+
+
+
+
+```
+
+```{r}
 for(n_k_zobrazeni in n_vzorku$n) {
   plot_name <- paste0("p_fixni_n_", n_k_zobrazeni)
   plots[[plot_name]] <- p_velikost_efektu %>% filter(n == n_k_zobrazeni) %>% ggplot(aes(x = p, fill = druh_rozdilu, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) + 
@@ -91,9 +113,8 @@ for(efekt_k_zobrazeni in velikost_efektu$efekt) {
       ggtitle(hg_sd_label(efekt_k_zobrazeni))
   print(plots[[plot_name]])
 }
-
-
 ```
+
 
 ```{r}
 power.t.test(delta = effect_ace_minus_placebo, sd = sbp_sd, sig.level = 0.05, power = 0.8)
@@ -167,6 +188,26 @@ for(efekt_k_zobrazeni in efekty_pro_vice_studii) {
 }
 ```
 
+## Malá změna v datech
+
+```{r}
+set.seed(3494994)
+g1 <- round(rnorm(20, mean = sbp_baseline, sd = sbp_sd))
+cat(paste(g1, collapse = "\t"))
+cat("\n\n")
+g2 <- sample(g1, 20) - 13
+cat(paste(g2, collapse = "\t"))
+cat("\n")
+
+t.test(g1, g2)
+
+g2_mod <- g2
+g2_mod[20] <- g2_mod[20] + 10
+t.test(g1, g2_mod)
+```
+
+
+## RCT vs. biasnutá studie
 
 
 TODO radeji fakt simulovat RCT (dve skupiny)
@@ -197,6 +238,7 @@ biased_results <- data.frame(low_error = sqrt(quantile(biased_study_errors, 0.02
 
 ```
 
+
 ```{r}
 plots$rct_error <- 
 rct_results %>% ggplot(aes(x = sample_size, y = mean_error))  + #, ymin = low_error, ymax = high_error
@@ -221,6 +263,8 @@ plots$rct_error_biased_decoy <-
 ```
 
 Láme se to u cca 80 pacientů v RCT
+
+## Conditioning on a collider
 
 ```{r, fig.width= 6, fig.height=5}
 set.seed(56852266)
@@ -268,6 +312,8 @@ for(plot_name in paste0("laskavy_pohledny_", 1:6)){
   heights[[plot_name]] <- 5
 }
 ```
+
+## Regression to the mean
 
 ```{r}
 set.seed(99852665)
