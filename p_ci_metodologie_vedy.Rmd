@@ -27,6 +27,7 @@ heights <- list()
 P hodnoty dle velikosti efektu
 
 ```{r}
+set.seed(56684322)
 velikost_efektu <- tibble(efekt = c(0, -5 / sbp_sd, effect_ace_minus_placebo / sbp_sd, -1))
 n_vzorku <- tibble(n = c(15, 30, 60, 120))
 #n_vzorku <- tibble(n = seq(sqrt(15), sqrt(120), length.out = 4) ^ 2 %>% round())
@@ -36,7 +37,8 @@ single_p_sim <- function(data_row) {
   treatment <- rnorm(data_row$n, data_row$efekt, 1)
   test_res <- t.test(control, treatment)
   
-  cbind(data_row, tibble(p = test_res$p.value, zmereny_rozdil = mean(treatment) - mean(control)))
+  cbind(data_row, tibble(p = test_res$p.value, zmereny_rozdil = mean(treatment) - mean(control), 
+                         conf_low = -test_res$conf.int[1], conf_high = -test_res$conf.int[2]))
 }
 
 p_velikost_efektu <- velikost_efektu %>% 
@@ -141,6 +143,8 @@ for(i in 1:length(efekty) ) {
 # Více studií
 
 ```{r}
+set.seed(321685524)
+
 n_studii <- 8
 n_vice_studii <- 30
 studie_df_raw <- list()
@@ -206,6 +210,19 @@ g2_mod[20] <- g2_mod[20] + 10
 t.test(g1, g2_mod)
 ```
 
+## Konfidenční interval
+
+```{r}
+p_velikost_efektu %>%
+  filter(n == 30) %>%
+  head(15) %>%
+  mutate(id = 1:n()) %>%
+  ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + geom_linerange() + 
+  geom_point() + geom_hline(yintercept = 0) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) +
+  coord_flip()
+```
+
+
 
 ## RCT vs. biasnutá studie
 
@@ -213,6 +230,8 @@ t.test(g1, g2_mod)
 TODO radeji fakt simulovat RCT (dve skupiny)
 
 ```{r}
+set.seed(321355422)
+
 full_population <- rnorm(1e6, effect_ace_minus_placebo, sbp_sd)
 increase_biases <- c(3/2, 4/3, 11/10)
 
