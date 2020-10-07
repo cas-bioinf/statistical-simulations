@@ -1,0 +1,98 @@
+---
+title: "Workflow paper"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(brms)
+library(bayesplot)
+library(patchwork)
+options(mc.cores = parallel::detectCores())
+theme_set(theme_bw())
+```
+
+
+```{r, fig.width=6.5, fig.height=2}
+prior_check_list <- list()
+N_predictors <- c(2,4, 15)
+for(i in 1:length(N_predictors)) {
+  N_sims <- 1000
+  N_data_points <- 100
+  coeffs <- data.frame(sim = 1:N_sims) %>%
+    mutate(intercept = rnorm(n(), 0, 1)) %>%
+    crossing(pred = 1:N_predictors[i]) %>%
+    mutate(b = rnorm(n(), 0, 1))
+  
+  data <- crossing(id = 1:N_data_points, pred = 1:N_predictors[i]) %>%
+    mutate(X = rbinom(n(), 1, 0.5)) %>%
+    inner_join(coeffs, by = "pred")
+  
+  if(nrow(data) != N_predictors[i] * N_data_points * N_sims){ 
+    stop("error")
+  }
+  
+  prior_check_list[[i]] <- data %>% group_by(id, sim, intercept) %>% 
+    summarise(linpred = sum(b * X), n_pred = n(), .groups = "drop") %>%
+    mutate(prob = 1/(1 + exp(-linpred - intercept)), response = rbinom(n(), 1, prob = prob)) 
+}  
+
+prior_check <- do.call(rbind, prior_check_list)
+
+prior_check_plot <- prior_check %>% ggplot(aes(x = prob)) + geom_histogram(breaks = seq(0,1, by = 0.05)) + facet_wrap(~n_pred, labeller = label_bquote(cols = .(n_pred) ~ predictors )) + scale_x_continuous("Response mean (per data row)") + theme(panel.spacing = unit(10, "pt"))
+
+prior_check_plot
+
+ggsave("local_temp_data/prior_predictive_logistic.pdf", prior_check_plot, width = 6.5, height = 2)
+
+```
+
+```{r}
+set.seed(85524)
+data_lnorm <- data.frame(y = rlnorm(15, 3, 1))
+fit_lnorm <- brm(y ~ 1, family = gaussian(), backend = "cmdstan", data = data_lnorm, cores = 4)
+pp_lnorm <- pp_check(fit_lnorm, type = "dens_overlay", nsamples = 20)
+pp_lnorm
+```
+
+
+```{r}
+set.seed(197854312)
+#data_eg <- data.frame(x = rgamma(20, shape = 3, rate = 0.3))
+data_betabinom <- data.frame(y = rbinom(15, 7, prob = rbeta(15, 3, 1)))
+fit_betabinom <- brm(y | trials(7) ~ 1, family = binomial(), backend = "cmdstan", data = data_betabinom)
+pp_betabinom <- pp_check(fit_betabinom, type = "stat", stat = "sd", binwidth = 0.1)
+pp_betabinom
+```
+
+
+```{r}
+set.seed(32148234)
+data_groups <- data.frame(group = c("Low","High")[rbinom(70, 1, 0.5) + 1]) %>%
+  mutate(prob = if_else(group == "Low", 0.4, 0.6), y = rbinom(n(), size = 6, prob = prob))
+
+fit_groups <- brm(y | trials(6) ~ 1, family = binomial(), data = data_groups, backend = "cmdstan")
+
+preds <- posterior_predict(fit_groups, nsamples = 1000)
+preds[preds > max(data_groups$y)] <- max(data_groups$y) + 1
+pp_groups_whole <- ppc_bars(data_groups$y, preds)
+pp_groups_whole
+pp_groups <- ppc_bars_grouped(data_groups$y, preds, group = data_groups$group)
+pp_groups
+```
+
+
+```{r, fig.width=7, fig.height=4}
+pp_all <- ((pp_lnorm + labs(tag = "A")) / (pp_betabinom + labs(tag = "B"))) | ((pp_groups_whole + labs(tag = "C")) / (pp_groups + labs(tag = "D")))
+pp_all
+ggsave("local_temp_data/posterior_predictive_simple.pdf", pp_all, width = 7, height = 4)
+```
+
+
+
+```{r}
+
+
+sessionInfo()
+```
+
