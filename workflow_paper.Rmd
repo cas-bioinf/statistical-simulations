@@ -91,6 +91,131 @@ ggsave("local_temp_data/posterior_predictive_simple.pdf", pp_all, width = 7, hei
 
 
 ```{r}
+y = c(-0.6906332,  1.2873201, -1.6422984,  2.0089285, 0.1347772 -0.8905993 -1.5295488 -0.8171846)
+underdetermined_theory <- crossing(mu = seq(-3, 3, length.out = 200), log_sigma = seq(-2, 2, length.out = 200),
+         data.frame(y_id = 1:length(y), y = y), n_data = c(1,2,8)
+         ) %>%
+  filter(y_id <= n_data) %>%
+  mutate(log_density_point = dnorm(y, mu, exp(log_sigma), log = TRUE)) %>%
+  group_by(mu, log_sigma, n_data) %>%
+  summarise(log_density = sum(log_density_point), .groups = "drop") %>%
+  group_by(n_data) %>%
+  mutate(rel_density = exp(log_density - max(log_density))) %>%
+  ggplot(aes(x = mu, y = log_sigma, z = rel_density)) + geom_contour() + #geom_raster() + 
+  facet_wrap(~n_data, nrow = 1, labeller = label_bquote(cols = paste(N, " = ", .(n_data)) )) + scale_y_continuous("log(sigma)")
+
+underdetermined_theory
+```
+```{r}
+lynx_hare_df <-
+  read.csv("hudson-bay-lynx-hare.csv",
+           comment.char="#")
+
+
+lv_model <- cmdstanr::cmdstan_model("lotka-volterra.stan")
+
+N <- length(lynx_hare_df$Year) - 1
+ts <- 1:N
+y_init <- c(lynx_hare_df$Hare[1], lynx_hare_df$Lynx[1])
+y <- as.matrix(lynx_hare_df[2:(N + 1), 2:3])
+y <- cbind(y[ , 2], y[ , 1]); # hare, lynx order
+lynx_hare_data_full <- list(N = N, ts = ts, y_init = y_init, y = y)
+
+fit_full <- lv_model$sample(data = lynx_hare_data_full)
+```
+
+```{r}
+rstan_fit_full <- rstan::read_stan_csv(fit_full$output_files())
+#shinystan::launch_shinystan(rstan_fit_reduced)
+
+data_full <- as.matrix(rstan_fit_full, pars = c("theta[1]", "sigma[1]")) %>% as.data.frame()
+np <-  nuts_params(rstan_fit_full) %>% filter(Parameter == "divergent__") %>% transmute(divergent = as.logical(Value))
+
+
+data_full <- cbind(data_full, np) %>% mutate(n_data = N + 1)
+
+
+# lv_pairs_full <- bayesplot::mcmc_scatter(rstan_fit_full, pars = c("theta[1]", "sigma[1]"), transformations = log, np = nuts_params(rstan_fit_full), alpha = 0.1, np_style = bayesplot::scatter_style_np(div_alpha = 0.8))+ scale_y_continuous("log(sigma[1])") + scale_x_continuous("log(theta[1])")
+# lv_pairs_full
+```
+
+```{r}
+set.seed(589762569)
+N_mid <- 8
+ts <- 1:N_mid
+y_init <- c(lynx_hare_df$Hare[1], lynx_hare_df$Lynx[1])
+y <- as.matrix(lynx_hare_df[2:(N_mid + 1), 2:3])
+y <- cbind(y[ , 2], y[ , 1]); # hare, lynx order
+lynx_hare_data_mid <- list(N = N_mid, ts = ts, y_init = y_init, y = y)
+
+fit_mid <- lv_model$sample(data = lynx_hare_data_mid)
+```
+
+
+
+```{r}
+rstan_fit_mid <- rstan::read_stan_csv(fit_mid$output_files())
+#shinystan::launch_shinystan(rstan_fit_reduced)
+data_mid <- as.matrix(rstan_fit_mid, pars = c("theta[1]", "sigma[1]")) %>% as.data.frame()
+np <-  nuts_params(rstan_fit_mid) %>% filter(Parameter == "divergent__") %>% transmute(divergent = as.logical(Value))
+
+
+data_mid <- cbind(data_mid, np) %>% mutate(n_data = N_mid + 1)
+
+# lv_pairs_reduced <- bayesplot::mcmc_scatter(rstan_fit_reduced, pars = c("theta[1]", "sigma[1]"), transformations = log, np = nuts_params(rstan_fit_reduced), alpha = 0.1, np_style = bayesplot::scatter_style_np(div_alpha = 0.5)) + scale_y_continuous("log(sigma[1])") + scale_x_continuous("log(theta[1])")
+# lv_pairs_reduced
+
+
+```
+
+
+```{r}
+set.seed(3248856)
+N_reduced <- 5
+ts <- 1:N_reduced
+y_init <- c(lynx_hare_df$Hare[1], lynx_hare_df$Lynx[1])
+y <- as.matrix(lynx_hare_df[2:(N_reduced + 1), 2:3])
+y <- cbind(y[ , 2], y[ , 1]); # hare, lynx order
+lynx_hare_data_reduced <- list(N = N_reduced, ts = ts, y_init = y_init, y = y)
+
+fit_reduced <- lv_model$sample(data = lynx_hare_data_reduced)
+```
+
+
+
+```{r}
+rstan_fit_reduced <- rstan::read_stan_csv(fit_reduced$output_files())
+#shinystan::launch_shinystan(rstan_fit_reduced)
+data_reduced <- as.matrix(rstan_fit_reduced, pars = c("theta[1]", "sigma[1]")) %>% as.data.frame()
+np <-  nuts_params(rstan_fit_reduced) %>% filter(Parameter == "divergent__") %>% transmute(divergent = as.logical(Value))
+
+
+data_reduced <- cbind(data_reduced, np) %>% mutate(n_data = N_reduced + 1)
+
+# lv_pairs_reduced <- bayesplot::mcmc_scatter(rstan_fit_reduced, pars = c("theta[1]", "sigma[1]"), transformations = log, np = nuts_params(rstan_fit_reduced), alpha = 0.1, np_style = bayesplot::scatter_style_np(div_alpha = 0.5)) + scale_y_continuous("log(sigma[1])") + scale_x_continuous("log(theta[1])")
+# lv_pairs_reduced
+
+data_all <- rbind(data_full, data_mid, data_reduced)
+undetermined_lv <- data_all %>% 
+  filter(!divergent) %>%
+  ggplot(aes(x = `theta[1]`, y = log(`sigma[1]`))) + geom_point(alpha = 0.1, color = "darkblue") + geom_point(data = data_all %>% filter(divergent), color = "red", alpha = 0.5) + facet_wrap(~n_data, nrow = 1, labeller = label_bquote(cols = paste(N, " = ", .(n_data)) )) + scale_y_continuous("log(sigma[1])") + scale_x_continuous("log(theta[1])")
+undetermined_lv
+```
+
+```{r}
+
+```
+
+
+```{r, fig.width=8, fig.height=3}
+underdetermined_all <-  (underdetermined_theory + labs(tag = "A")) | (undetermined_lv + labs(tag = "B"))
+underdetermined_all
+
+ggsave("local_temp_data/underdetermined.pdf", underdetermined_all, width = 8, height = 3)
+```
+
+
+```{r}
 
 
 sessionInfo()
