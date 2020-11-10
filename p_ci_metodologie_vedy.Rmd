@@ -157,7 +157,7 @@ for(efekt_pro_simulace in efekty_pro_vice_studii) {
   for(i in 1:n_sims) {
     studie_df_raw[[next_id]] <- p_pro_sim %>% sample_n(n_studii) %>% 
       group_by(n, efekt, efekt_f) %>%
-      summarise(min.p = min(p), max.p = max(p), min.zmereny_rozdil = min(zmereny_rozdil), max.zmereny_rozdil = max(zmereny_rozdil))
+      summarise(min.p = min(p), max.p = max(p), min.zmereny_rozdil = min(zmereny_rozdil), max.zmereny_rozdil = max(zmereny_rozdil), .groups = "drop")
       #summarise(min.p = min(p), max.p = max(p), min.zmereny_rozdil = min(c(Inf,zmereny_rozdil[p < 0.05])), max.zmereny_rozdil = max(c(-Inf,zmereny_rozdil[p < 0.05])))
     next_id <- next_id + 1
   }
@@ -215,26 +215,40 @@ t.test(g1, g2_mod)
 ## Konfidenční interval
 
 ```{r}
+p_velikost_efektu <- p_velikost_efektu %>% 
+  mutate(p_formatted = if_else(
+    p >= 0.001, paste0("p = ",(round(p, 3))), "p < 0.001"),
+    stars = case_when(p > 0.05 ~ "   ",
+                      p > 0.01 ~ "  *",
+                      p > 0.001 ~ " **",
+                      TRUE ~ "***"
+                      ))
+    #p >= 0.0001 ~ as.cha
+  
+
 for(ci_to_show in c(0, 1, 2, 3, 15)) {
   plot_name <- paste0("ci_tanec_prvni_", ci_to_show)
 
   if(ci_to_show == 0) {
     geom1 <- NULL
     geom2 <- NULL
+    geom3 <- NULL
     ci_to_show <- 1
   } else {
     geom1 <- geom_linerange()
-    geom2 <- geom_point(size = 2)
+    geom2 <- geom_point(size = 3)
+    geom3 <- geom_text(aes(label = paste0(stars, " ", p_formatted)), y = 0.5 * sbp_sd, hjust = 0, vjust = 0.5, size = 5, family = "mono")
   }
   plots[[plot_name]] <- p_velikost_efektu %>%
     filter(n == n_first_plot, efekt == velikost_efektu$efekt[3]) %>%
     head(ci_to_show) %>%
     mutate(id = seq(from = 1, length.out = n())) %>%
-    ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + 
-    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) + facet_efekt() +
-    geom1 + geom2 +
-    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl, 95% CI") +
-    expand_limits(x = c(1,15), y = c(-1.5, 0.6)) +
+    ggplot(aes(x = id, y = zmereny_rozdil * sbp_sd, ymin = conf_low * sbp_sd, ymax = conf_high * sbp_sd)) + 
+    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt * sbp_sd), color = "blue", linetype = "dashed", size = 2) + 
+    facet_efekt() +
+    geom1 + geom2 + geom3 +
+    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl [mmHg], 95% CI") +
+    expand_limits(x = c(1,15), y = c(-1.5, 1.1) * sbp_sd) +
     ggtitle(paste0("N: ", n_first_plot)) +
     theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank())
 
@@ -251,12 +265,13 @@ for(n_k_zobrazeni in n_vzorku$n) {
     top_n(15, id_raw) %>%
     mutate(id = 1:n()) %>%
     ungroup() %>%
-    ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + 
-    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) + facet_efekt(scales = "fixed") +
+    ggplot(aes(x = id, y = zmereny_rozdil * sbp_sd, ymin = conf_low * sbp_sd, ymax = conf_high * sbp_sd)) + 
+    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt * sbp_sd), color = "blue", linetype = "dashed", size = 2) + facet_efekt(scales = "fixed") +
     geom_linerange() +   geom_point(size = 2) + 
-    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl, 95% CI") +
+    geom_text(aes(label = paste0(stars, " ", p_formatted)), y = 1.1 * sbp_sd, hjust = 0, vjust = 0.5, size = 2.5, family = "mono") +
+    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl [mmHg], 95% CI") +
     ggtitle(paste0("N: ", n_k_zobrazeni)) + 
-    expand_limits(y = c(-2, 1.3)) +
+    expand_limits(y = c(-2, 2) * sbp_sd) +
     theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank())
   
   print(plots[[plot_name]])
@@ -311,26 +326,37 @@ TODO radeji fakt simulovat RCT (dve skupiny)
 set.seed(321355422)
 
 full_population <- rnorm(1e6, effect_ace_minus_placebo, sbp_sd)
-increase_biases <- c(3/2, 4/3, 11/10)
+increase_biases <- c(3/2, 4/3, 10/9)
+increase_biases_labels <- c("3:2", "4:3", "10:9")
 
 biased_study_population_size <- 1e5
 biased_study_errors <- numeric(n_sims * length(increase_biases))
-for(bias in increase_biases) {
+all_biases <- numeric(n_sims * length(increase_biases))
+for(bias_index in 1:length(increase_biases)) {
+  bias <- increase_biases[bias_index]
   full_population_probs <-if_else(full_population < 0, 1, bias)
   for(i in 1:n_sims) {
     biased_sample <- sample(full_population, size = biased_study_population_size, replace = TRUE, prob = full_population_probs)
-    biased_study_errors[i] <- (mean(biased_sample) - effect_ace_minus_placebo)^2 
+    index <-  (bias_index - 1) * n_sims + i
+    biased_study_errors[index] <- (mean(biased_sample) - effect_ace_minus_placebo)^2 
+    all_biases[index] <- bias
   }
 }
   
-rct_results <- data.frame(sample_size = 5 * (2 ^ (0:7))) %>% crossing(sim = 1:n_sims) %>%
+rct_results <- data.frame(sample_size = 5 * (2 ^ (0:8))) %>% crossing(sim = 1:n_sims) %>%
   rowwise() %>%
   mutate(error = mean(rnorm(sample_size, 0, sbp_sd)) ^ 2) %>%
   group_by(sample_size) %>%
-  summarise(low_error = sqrt(quantile(error, 0.025)), mean_error = sqrt(mean(error)), high_error = sqrt(quantile(error, 0.975)))
+  summarise(low_error = sqrt(quantile(error, 0.025)), mean_error = sqrt(mean(error)), high_error = sqrt(quantile(error, 0.975)), .groups = "drop")
 
-biased_results <- data.frame(low_error = sqrt(quantile(biased_study_errors, 0.025)), mean_error = sqrt(mean(biased_study_errors)), high_error = sqrt(quantile(biased_study_errors, 0.975))) %>% 
-  crossing(data.frame(sample_size = unique(rct_results$sample_size)))
+biased_results <- data.frame(bias = all_biases, study_error = biased_study_errors) %>%
+  group_by(bias) %>% 
+  summarise(low_error = sqrt(quantile(study_error, 0.025)), 
+            mean_error = sqrt(mean(study_error)), 
+            high_error = sqrt(quantile(study_error, 0.975)),
+            .groups = "drop")
+# %>% 
+#   crossing(data.frame(sample_size = unique(rct_results$sample_size)))
 
 
 ```
@@ -345,17 +371,21 @@ rct_results %>% ggplot(aes(x = sample_size, y = mean_error))  + #, ymin = low_er
   scale_y_continuous("Půměrná chyba RCT [mmHg]") +
   scale_x_continuous("Velikost vzorku RCT")
 
+plots$rct_error
+
 hline_size <- 2
 pal <- viridisLite::plasma(3)
 
 plots$rct_error_biased <- 
   plots$rct_error +
-    geom_hline(data = biased_results, aes(yintercept = mean_error), color = pal[2], size = hline_size)
+    geom_hline(data = biased_results, aes(yintercept = mean_error, color = factor(bias, levels = increase_biases, labels = increase_biases_labels)), size = hline_size) + 
+  scale_color_viridis_d("Zhoršení:zlepšení")
 
-plots$rct_error_biased_decoy <- 
-  plots$rct_error_biased +
-    geom_hline(yintercept = 0.84, color =  pal[1], size = hline_size) +
-    geom_hline(yintercept = 2.53, color =  pal[3], size = hline_size)
+plots$rct_error_biased
+
+biased_results %>% transmute(bias = bias, biased_mean_error = mean_error) %>% 
+  crossing(rct_results) %>% filter(biased_mean_error < mean_error) %>% group_by(bias) %>%
+  summarise(max(sample_size))
 
 ```
 

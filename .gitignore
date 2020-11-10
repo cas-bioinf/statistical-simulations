@@ -34,6 +34,10 @@ vignettes/*.pdf
 .Rproj.user
 
 *.nb.html
+*.html
+*.exe
+
+enbik_files/
 
 libs/
 local_temp_data/
