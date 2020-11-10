@@ -61,7 +61,9 @@ hg_sd_label <- function(sd_val) {
 }
 
 
-facet_efekt <- facet_wrap(~efekt_f, scales = "free", labeller = labeller(efekt_f = hg_sd_label))
+facet_efekt <- function(scales = "free") { 
+  facet_wrap(~efekt_f, scales = scales, labeller = labeller(efekt_f = hg_sd_label))
+}
 
 make_scale_pocet <- function(n_sims) {
   scale_y_continuous("Frekvence", labels = function(x) { scales::percent(x / n_sims, accuracy = 1)}, trans = scales::trans_new("Relative", transform = function(x) { x / n_sims}, inverse = function(x) { x * n_sims}))
@@ -86,7 +88,7 @@ plots$p_fixni_efekt_prvni <- p_velikost_efektu %>%
     filter(n == n_first_plot) %>% 
     ggplot(aes(x = p, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) +  
     scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
-    scale_pocet + facet_efekt + ggtitle(paste0("N: ", n_first_plot))
+    scale_pocet + facet_efekt() + ggtitle(paste0("N: ", n_first_plot))
 plots$p_fixni_efekt_prvni
 
 
@@ -99,7 +101,7 @@ plots$p_fixni_efekt_prvni
 for(n_k_zobrazeni in n_vzorku$n) {
   plot_name <- paste0("p_fixni_n_", n_k_zobrazeni)
   plots[[plot_name]] <- p_velikost_efektu %>% filter(n == n_k_zobrazeni) %>% ggplot(aes(x = p, fill = druh_rozdilu, alpha = p < 0.05)) + geom_histogram(breaks = p_breaks) + 
-      scale_pocet + facet_efekt + scale_fill_discrete("Změřený rozdíl") +
+      scale_pocet + facet_efekt() + scale_fill_discrete("Změřený rozdíl") +
       scale_alpha_discrete(range = c(0.5,1), guide = FALSE) +
       ggtitle(paste0("N: ", n_k_zobrazeni))
   print(plots[[plot_name]])
@@ -131,7 +133,7 @@ for(i in 1:length(efekty) ) {
   plot_name <- paste0("m_and_s_error_",n_k_zobrazeni,"_eff_", round(abs(efekt_k_zobrazeni),2))
   plots[[plot_name]] <- p_velikost_efektu %>% filter(n == n_k_zobrazeni, efekt == efekt_k_zobrazeni, p < 0.05) %>%
     ggplot(aes(x = zmereny_rozdil * sbp_sd)) + geom_histogram(aes(y = stat(width*density)), binwidth = 1)  + geom_vline(xintercept = efekt_k_zobrazeni * sbp_sd, color = "blue", size = 2, linetype = "dashed") + 
-    facet_efekt + scale_y_continuous("Podíl", labels = scales::percent) + scale_x_continuous("Změřený rozdíl [mmHg]") +
+    facet_efekt() + scale_y_continuous("Podíl", labels = scales::percent) + scale_x_continuous("Změřený rozdíl [mmHg]") +
     ggtitle(paste0("Pouze p < 0.05, N: ", n_k_zobrazeni))
   print(plots[[plot_name]])
   
@@ -175,7 +177,7 @@ for(efekt_k_zobrazeni in efekty_pro_vice_studii) {
   
   plot_name_p <- paste0(plot_name_base, "_p")
   plots[[plot_name_p]] <- p_vice_studii_long %>% filter(meritko == "p", efekt == efekt_k_zobrazeni) %>%
-      ggplot(aes(x = hodnota, color = typ)) + geom_freqpoly(breaks = p_breaks) + scale_pocet + facet_efekt + title +
+      ggplot(aes(x = hodnota, color = typ)) + geom_freqpoly(breaks = p_breaks) + scale_pocet + facet_efekt() + title +
       geom_vline(xintercept = 0.05, color = "green", size = 2, linetype = "dashed") +
     scale_x_continuous("p-hodnota")
   widths[[plot_name_p]] <- 6
@@ -183,7 +185,7 @@ for(efekt_k_zobrazeni in efekty_pro_vice_studii) {
 
   plot_name_zmereny <- paste0(plot_name_base, "_zmereny_rozdil")
   plots[[plot_name_zmereny]] <- p_vice_studii_long %>% filter(meritko == "zmereny_rozdil", efekt == efekt_k_zobrazeni, !is.infinite(hodnota)) %>%
-      ggplot(aes(x = hodnota * sbp_sd, color = typ)) + geom_freqpoly(bins = 10) + scale_pocet + facet_efekt + title +
+      ggplot(aes(x = hodnota * sbp_sd, color = typ)) + geom_freqpoly(bins = 10) + scale_pocet + facet_efekt() + title +
     geom_vline(xintercept = efekt_k_zobrazeni * sbp_sd, color = "blue", size = 2, linetype = "dashed") +
     scale_x_continuous("Změřený rozdíl")
   widths[[plot_name_zmereny]] <- 6
@@ -213,13 +215,89 @@ t.test(g1, g2_mod)
 ## Konfidenční interval
 
 ```{r}
-p_velikost_efektu %>%
-  filter(n == 30) %>%
-  head(15) %>%
-  mutate(id = 1:n()) %>%
-  ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + geom_linerange() + 
-  geom_point() + geom_hline(yintercept = 0) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) +
-  coord_flip()
+for(ci_to_show in c(0, 1, 2, 3, 15)) {
+  plot_name <- paste0("ci_tanec_prvni_", ci_to_show)
+
+  if(ci_to_show == 0) {
+    geom1 <- NULL
+    geom2 <- NULL
+    ci_to_show <- 1
+  } else {
+    geom1 <- geom_linerange()
+    geom2 <- geom_point(size = 2)
+  }
+  plots[[plot_name]] <- p_velikost_efektu %>%
+    filter(n == n_first_plot, efekt == velikost_efektu$efekt[3]) %>%
+    head(ci_to_show) %>%
+    mutate(id = seq(from = 1, length.out = n())) %>%
+    ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + 
+    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) + facet_efekt() +
+    geom1 + geom2 +
+    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl, 95% CI") +
+    expand_limits(x = c(1,15), y = c(-1.5, 0.6)) +
+    ggtitle(paste0("N: ", n_first_plot)) +
+    theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank())
+
+  print(plots[[plot_name]])
+
+}
+
+for(n_k_zobrazeni in n_vzorku$n) {
+  plot_name <- paste0("ci_tanec_n_", n_k_zobrazeni)
+  plots[[plot_name]] <- p_velikost_efektu %>%
+    filter(n == n_k_zobrazeni) %>%
+    mutate(id_raw = 1:n()) %>%
+    group_by(efekt) %>%
+    top_n(15, id_raw) %>%
+    mutate(id = 1:n()) %>%
+    ungroup() %>%
+    ggplot(aes(x = id, y = zmereny_rozdil, ymin = conf_low, ymax = conf_high)) + 
+    geom_hline(yintercept = 0, color = "red", size = 2) + geom_hline(aes(yintercept = efekt), color = "blue", linetype = "dashed", size = 2) + facet_efekt(scales = "fixed") +
+    geom_linerange() +   geom_point(size = 2) + 
+    coord_flip() + scale_x_continuous("") + scale_y_continuous("Změřený rozdíl, 95% CI") +
+    ggtitle(paste0("N: ", n_k_zobrazeni)) + 
+    expand_limits(y = c(-2, 1.3)) +
+    theme(axis.text.y = element_blank(), axis.ticks.y = element_blank(), axis.line.y = element_blank())
+  
+  print(plots[[plot_name]])
+}
+
+
+```
+
+
+## Lineární modely
+
+
+```{r}
+set.seed(3494949)
+n <- 200
+data_linear_continous <- data.frame(age = runif(n, 40, 65)) %>%
+  mutate(SBP = rnorm(n, 9/20 * (age-40) + 130 , sbp_sd)) 
+plots$linear_continuous1 <- data_linear_continous %>%
+  ggplot(aes(x = age, y = SBP)) + geom_point() +  scale_x_continuous("Věk") +
+  scale_y_continuous("SBP [mm Hg]")
+
+plots$linear_continuous1
+
+plots$linear_continuous2 <- plots$linear_continuous1 + geom_smooth(method = "lm")
+plots$linear_continuous2
+
+plots$linear_continuous_inverted <- data_linear_continous %>%
+  ggplot(aes(y = age, x = SBP)) + geom_point() +  scale_y_continuous("Věk") +
+  scale_x_continuous("SBP [mm Hg]")+ geom_smooth(method = "lm")
+plots$linear_continuous_inverted
+```
+
+```{r}
+set.seed(234234342)
+n_per_group <- 50
+plots$linear_binary <- 
+data.frame(Skupina = rep(c(0,1), each = n_per_group), SBP = c(rnorm(n_per_group, mean = sbp_baseline, sd = sbp_sd), rnorm(n_per_group, mean = sbp_baseline + effect_ace_minus_placebo, sd = sbp_sd))) %>%
+  ggplot(aes(x = Skupina, y = SBP)) + geom_jitter(width = 0.01, height = 0) + geom_smooth(method = "lm") + scale_x_continuous(breaks = c(0,1), labels = c("Control","Treatment")) +
+  scale_y_continuous("SBP [mm Hg]")
+
+plots$linear_binary
 ```
 
 
