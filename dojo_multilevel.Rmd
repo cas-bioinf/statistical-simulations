@@ -1,5 +1,5 @@
 ---
-title: "Multilevel modles and metaanalysis"
+title: "Multilevel models and metaanalysis"
 author: "Martin Modrák"
 #date: "2016/12/12 (updated: `r Sys.Date()`)"
 output:
@@ -11,32 +11,46 @@ output:
       countIncrementalSlides: false
 ---
 
+# Intro
+
+- Goes by many names: 
+  - Multilevel models 
+  - Random effects 
+  - Varying intercept/slope 
+  - Mixed models 
+  - Metaanalysis
+- Packages:
+  - `lme4` (frequentist)
+  - `rstanarm` (Bayesian, easy to install)
+  - `brms` (Bayesian, very flexible)
+
 ```{r setup, include=FALSE}
 options(htmltools.dir.version = FALSE)
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, fig.height = 6, fig.width = 9)
 library(rstanarm)
 library(tidybayes)
 library(tidyverse)
 library(cowplot)
 library(scico)
+library(patchwork)
 theme_set(theme_cowplot())
 output_dir <- here::here("local_temp_data")
 if(!dir.exists(output_dir)) {
   dir.create(output_dir)
 }
-options(mc.cores = parallel::detectCores())
+options(mc.cores = parallel::detectCores(), brms.backend = "cmdstanr")
 ```
-
-
 
 ---
 class: inverse, center, middle
+
+
 
 # Linear models recap
 
 ---
 
-# Model formulation
+## Model formulation
 
 $$\mu = \beta X$$
 --
@@ -48,7 +62,7 @@ $$y_i \sim N(\mu_i, \sigma)$$
 
 ---
 
-# Model formulation (R)
+## Model formulation (R)
 
 
 $$\mu_i = \beta_0 + \beta_{age} X_{i,age} + \beta_{treatment} X_{i,treatment}$$
@@ -62,7 +76,11 @@ mock_lin_data
 
 --
 
-R formula `y ~ 1 + age + group`
+R formula 
+
+```
+y ~ 1 + age + group
+```
 
 --
 
@@ -73,23 +91,17 @@ model.matrix(y ~ 1 + age + group, mock_lin_data)
 
 ---
 
-# Everything is a linear model!
+## Everything is a linear model!
 
 `t.test(groupA, groupB)` = `lm(y ~ group)` 
 
 ---
+class:inverse, middle, center
 
+# A simple example
 
 ```{r}
-set.seed(842223)
-batches <- c("A","B", "C")
-base_data <- tibble(batch = batches, var_intercept = c(0.1, 0, -0.1), var_effect = rnorm(length(batches), 0, 0.1)) %>% 
-  crossing(tibble(group = c("control", "treatment"), b = c(0, 1))) %>%
-  crossing(tibble(replicate = 1:3)) %>%
-  #filter(batch == "A" | replicate < 3) %>%
-  mutate(log_relative_expression = var_intercept + b* (0.25) + rnorm(n(), 0, 0.25), 
-         relative_expression = exp(log_relative_expression))
-
+# Helper plotting functions
 base_plot <- function(data) {
   set.seed(9882264) #Force seed to maintain identical jitter
   data %>% 
@@ -118,8 +130,236 @@ add_error_bars <- function(plot, nudge = -0.3, width = 0.2) {
     stat_summary(fun = "mean", geom = "point", shape = 3,  size = 3, stroke = 3, color = "#707070", position = position) 
 }
 
+```
+
+
+
+---
+
+## Single group of data
+
+```{r}
+batches <- c("A","B", "C")
+set.seed(5432188)
+base_data_single <- tibble(batch = batches, var_intercept = c(0.2, 0, -0.2), group ="") %>% 
+  crossing(tibble(replicate = 1:6)) %>%
+  filter( (batch != "B" | replicate < 5) & (batch != "C" | replicate < 4)) %>%
+  mutate(log_relative_expression = var_intercept + rnorm(n(), 0, 0.25), 
+         relative_expression = exp(log_relative_expression))
+
+
+base_data_single %>% 
+  base_plot() %>%
+  add_my_point()
+
+
+```
+
+---
+
+## Breaking it down
+
+```{r}
+base_data_single %>% base_plot() %>%
+  add_my_point() +
+  facet_wrap(~batch)
+```
+
+---
+
+## A set of bad options
+
+A) Ignore batches
+
+$$\mu_i = \alpha$$
+
+```{r, echo = TRUE}
+ignore <- t.test(log_relative_expression ~ 1, 
+                data = base_data_single)
+ignore$conf.int
+```
+
+--
+
+```{r, fig.height = 3.5, fig.width = 6}
+plot_single_all_together <-  base_data_single %>% 
+  base_plot() %>%
+  add_error_bars() %>%
+  add_my_point()
+
+plot_single_all_together
+```
+
+
+---
+
+## A set of bad options
+
+B) Treat batches as separate
+
+$$\mu_i = \alpha + \beta_1 \mathrm{isB}_i + \beta_2 \mathrm{isC}_i$$
+
+```{r, echo = TRUE}
+separate <- lm(log_relative_expression ~ batch, 
+               data = base_data_single) 
+confint(separate)
+```
+
+--
+
+```{r, fig.height = 3.5, fig.width = 6}
+base_data_single %>% base_plot() %>%
+  add_error_bars() %>% add_my_point() +
+  facet_wrap(~batch)
+```
+
+
+---
+
+## A set of bad options
+
+C) Take averages of the batches
+
+```{r}
+batch_means <- base_data_single  %>%
+  group_by(batch, group) %>%
+  summarise(log_relative_expression = mean(log_relative_expression), .groups = "drop") 
+
+```
+
+```{r, echo = TRUE}
+take_means <- t.test(log_relative_expression ~ 1, 
+                     data = batch_means)
+take_means$conf.int
+```
+
+--
+
+```{r, fig.height = 3.5, fig.width = 6}
+
+plot_batch_means <-  batch_means %>%
+  base_plot() %>%
+  add_error_bars() %>%
+  add_my_point()
+
+plot_batch_means
+
+```
+
+---
+
+## Varying intercept
+
+The batches are not identical, but also not independent
+
+$$\mu_i = \alpha + \beta_{batch(i)} \\
+\beta_{batch(1,2,3)} \sim N(0, \sigma_{batch})$$
+
+--
+
+```{r varying_intercept_rstanarm, cache=TRUE, echo = TRUE}
+varying_intercept <- rstanarm::stan_lmer(
+  log_relative_expression ~ 1 + (1 | batch), 
+  data = base_data_single)
+summ_varying_intercept <- 
+  summary(varying_intercept, probs = c(0.025,0.975))
+summ_varying_intercept[1:6, c("2.5%", "97.5%")]
+
+```
+
+???
+
+More parameters, less flexible
+
+---
+
+## A middle ground
+
+```{r}
+predict_data <- tibble(batch = batches) %>% crossing(group = unique(base_data_single$group))
+s <- posterior_linpred(varying_intercept, newdata = predict_data)
+varying_intercept_to_plot <- predict_data %>% mutate(log_mean = colMeans(s), mean = exp(log_mean), sd = sqrt(diag(cov(s))), low = log_mean - sd, high = log_mean + sd)
+
+
+add_my_crossbar <- function(plot, crossbar_data) { 
+  plot + geom_crossbar(aes(y = log_mean, ymin = low, ymax = high), data = crossbar_data, color = "#5d2e8c", fill = "white", width = 0.2, size = 2, position = position_nudge(x = 0.3)) 
+}
+
+plot_multilevel <- base_data_single %>% 
+  base_plot() %>%
+  add_error_bars() %>%
+  add_my_crossbar(varying_intercept_to_plot)  %>% add_my_point() + facet_wrap(~batch)
+  
+
+plot_multilevel
+```
+
+---
+
+## Partial pooling
+
+```{r}
+hide_axis_theme <- theme(axis.text.y = element_blank(), axis.title.y = element_blank(), axis.line.y = element_blank(),
+                         axis.ticks.y = element_blank())
+(((plot_batch_means + (plot_single_all_together+ hide_axis_theme)) + (plot_multilevel + hide_axis_theme)) & expand_limits( y = c(-0.55, 0.5))) + plot_layout(widths = c(0.25,0.25,0.5))
+```
+
+
+
+---
+
+## Different prediction tasks
+
+```{r}
+predict_data_new_level <- tibble(group = unique(base_data_single$group), batch = "NEW_BATCH")
+
+s_n <- posterior_linpred(varying_intercept, newdata = predict_data_new_level)
+varying_intercept_to_plot_n <- predict_data_new_level %>% mutate(log_mean = colMeans(s_n), mean = exp(log_mean), sd = sqrt(diag(cov(s_n))), low = log_mean - sd, high = log_mean + sd)
+
+
+plot_multilevel_intercept <- base_data_single %>% base_plot() %>%
+  add_error_bars() %>%
+  add_my_crossbar(varying_intercept_to_plot_n)  %>%
+  add_my_point()
+
+plot_multilevel_intercept + plot_multilevel & expand_limits( y = c(-0.55, 0.5))
+
+```
+
+
+
+---
+class: inverse, middle, center
+
+# More complex example
+
+---
+
+## All data together
+
+```
+log_relative_expression ~ group
+```
+
+
+$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i$$
+
+
+```{r}
+set.seed(6546542)
+batches <- c("A","B", "C")
+base_data <- tibble(batch = batches, var_intercept = c(0.2, 0, -0.2), var_effect = c(-0.3,0.1, 0.2)) %>% 
+  crossing(tibble(group = c("control", "treatment"), b = c(0, 1))) %>%
+  crossing(tibble(replicate = 1:10)) %>%
+  filter( (batch != "B" | replicate < 7) & (batch != "C" | replicate < 4)) %>%
+  #filter(batch == "A" | replicate < 3) %>%
+  mutate(log_relative_expression = var_intercept + b* (0.2 + var_effect)  + rnorm(n(), 0, 0.25), 
+         relative_expression = exp(log_relative_expression))
+
+
 plot_together_points <- base_data %>% 
   base_plot() %>%
+  add_error_bars() %>%
   add_my_point()
 
 plot_together_points
@@ -129,18 +369,16 @@ plot_together_points
 
 ---
 
-```{r}
-plot_together <- base_data  %>%
-  base_plot() %>%
-  add_error_bars() %>%
-  add_my_point()
-
-plot_together
+## Break it down
 
 ```
+log_relative_expression ~ batch * group
+```
+
+$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i + \beta_2 \mathrm{isB}_i + \beta_3 \mathrm{isC}_i + \\
+\beta_4 \mathrm{isTreatment}_i \mathrm{isB}_i + \beta_5  \mathrm{isTreatment}_i \mathrm{isC}_i$$
 
 
----
 
 ```{r, fig.width = 6, fig.height = 5}
 plot_separate <- base_data %>% base_plot() %>%
@@ -150,106 +388,76 @@ plot_separate <- base_data %>% base_plot() %>%
 plot_separate
 ```
 
----
+???
 
-# A set of bad options
-
-A) Ignore batches
-
-```{r, echo = TRUE}
-ignore <- t.test(log_relative_expression ~ group, data = base_data)
-ignore$conf.int
-
-```
-B) Treat batches as separate (with the same effect)
-
-```{r}
-separate <- lm(log_relative_expression ~ batch + group, data = base_data) 
-confint(separate)
-```
+I can also make the effect be the same in all groups
 
 ---
 
-# More bad options
-
-C) Take averages of the batches
-
-```{r}
-batch_means <- base_data  %>%
-  group_by(group, batch) %>%
-  summarise(log_relative_expression = mean(log_relative_expression), .groups = "drop") 
-
-batch_means %>%
-  base_plot() %>%
-  add_error_bars() %>%
-  add_my_point()
+## Varying intercept + varying effect
 
 ```
+log_relative_expression ~ group + (1 + group || batch)
+```
+
+
+$$\mu_i = \alpha + \beta_1 \mathrm{isTreatment}_i + \gamma_{batch(i)} + \delta_{batch(i)} \mathrm{isTreatment}_i \\
+\gamma_{batch(1,2,3)} \sim N(0, \sigma_{\mathrm{batch\_intercept}}) \\ 
+\delta_{batch(1,2,3)} \sim N(0, \sigma_{\mathrm{batch\_effect}})$$
+
 ```{r}
-take_means <- t.test(log_relative_expression ~ group, data = batch_means)
-take_means$conf.int
+# \begin{pmatrix}\gamma_{batch(1,2,3)} \\ \delta_{batch(1,2,3)} \end{pmatrix} 
+# \sim MVN(0, \Sigma)
+```
+
+
+```{r varying_effect_brms, cache=TRUE, echo = TRUE, results = "hide", message = FALSE, warning = FALSE}
+varying_effect <- brms::brm(
+  log_relative_expression ~ group + (1 + group || batch), 
+  data = base_data,
+  prior = c(brms::set_prior("normal(0,1)", class = "b"),
+            brms::set_prior("normal(0,1)", class = "sd")),
+  control = list(adapt_delta = 0.99))
+```
+
+---
+
+## Varying intercept + varying effect
+
+```{r}
+summ_varying_effect <- summary(varying_effect, probs = c(0.025,0.975))
+summ_varying_effect
 ```
 ---
 
-# A middle ground
 
-The batches are not identical, but also not independent
-
-$$\beta_{batch} \sim N(0, \sigma_{batch})$$
-
----
-
-```{r first_example_rstanarm, cache=TRUE, echo = TRUE}
-varying_intercept <- rstanarm::stan_lmer(log_relative_expression ~ 1 + group + (1 | batch), data = base_data)
-xx <- summary(varying_intercept, probs = c(0.025,0.975))
-xx[1:7,c("2.5%", "97.5%")]
-```
-
-```{r}
-#
-```
-
-
+## Varying intercept + varying effect
 
 ```{r}
 predict_data <- tibble(batch = batches) %>% crossing(group = unique(base_data$group))
-s <- posterior_linpred(fit, newdata = predict_data)
-fit_to_plot <- predict_data %>% mutate(log_mean = colMeans(s), mean = exp(log_mean), sd = sqrt(diag(cov(s))), low = log_mean - sd, high = log_mean + sd)
-fit_to_plot
-```
+s <- posterior_linpred(varying_effect, newdata = predict_data)
+varying_effect_to_plot <- predict_data %>% mutate(log_mean = colMeans(s), mean = exp(log_mean), sd = sqrt(diag(cov(s))), low = log_mean - sd, high = log_mean + sd)
 
-```{r, fig.width = 6, fig.height = 5}
 
-add_my_crossbar <- function(plot, crossbar_data) { 
-  plot + geom_crossbar(aes(y = log_mean, ymin = low, ymax = high), data = crossbar_data, color = "#5d2e8c", fill = "white", width = 0.2, size = 2, position = position_nudge(x = 0.3)) 
-}
-
-plot_multilevel <- base_data %>% base_plot() %>% 
+plot_multilevel_effect <- base_data %>% 
+  base_plot() %>%
   add_error_bars() %>%
-  add_my_crossbar(fit_to_plot)  %>% add_my_point() + facet_wrap(~batch)
+  add_my_crossbar(varying_effect_to_plot)  %>% add_my_point() + facet_wrap(~batch)
   
 
-plot_multilevel
-ggsave(paste0(output_dir, "/separate_multilevel.png"), plot_multilevel, width = 6, height = 5)
+plot_multilevel_effect
 ```
 
-```{r, fig.width=3, fig.height=5}
-predict_data_new_level <- tibble(group = unique(base_data$group), batch = "NEW_BATCH")
-
-s_n <- posterior_linpred(fit, newdata = predict_data_new_level)
-fit_to_plot_n <- predict_data_new_level %>% mutate(log_mean = colMeans(s_n), mean = exp(log_mean), sd = sqrt(diag(cov(s_n))), low = log_mean - sd, high = log_mean + sd)
 
 
-plot_multilevel_intercept <- base_data %>% base_plot() %>%
-  add_error_bars() %>%
-  add_my_crossbar(fit_to_plot_n)  %>%
-  add_my_point()
-
-
-
-plot_multilevel_intercept
-ggsave(paste0(output_dir, "/separate_together.png"), plot_multilevel_intercept, width = 3, height = 5)
+```{r}
+# # Partial pooling
+# hide_axis_theme <- theme(axis.text.y = element_blank(), axis.title.y = element_blank(), axis.line.y = element_blank(),
+#                          axis.ticks.y = element_blank())
+# (((plot_all_together + hide_axis_theme)) + (plot_multilevel_effect + hide_axis_theme)) & expand_limits( y = c(-0.55, 0.5))) + plot_layout(widths = c(0.25,0.25,0.5))
 ```
+
+
 
 ---
 class: inverse, center, middle
@@ -258,563 +466,56 @@ class: inverse, center, middle
 
 ---
 
+## Now it's simple
+
 That's exactly what meta-analysis is! 
 
+```{r}
+metaanalysis_data <- data.frame(estimate = c(-0.7, -1.5, -0.4, 0.1), std_error = c(1, 0.8, 0.4, 3)/3, study = LETTERS[1:4] ) %>% mutate(ci_low = estimate - 1.96 * std_error, ci_high = estimate + 1.96 * std_error)
 
----
+plot_metaanalysis <- metaanalysis_data %>%
+  ggplot(aes(x = study, y = estimate, ymin = ci_low, ymax = ci_high)) +
+  geom_hline(yintercept = 0, color = "blue") + 
+  geom_linerange() + 
+  geom_point() + coord_flip() 
 
-
-
----
-
-- or use the [RStudio Addin](https://rstudio.github.io/rstudioaddins/)<sup>2</sup> "Infinite Moon Reader" to live preview the slides (every time you update and save the Rmd document, the slides will be automatically reloaded in RStudio Viewer.
-
-.footnote[
-[1] 中文用户请看[这份教程](https://slides.yihui.org/xaringan/zh-CN.html)
-
-[2] See [#2](https://github.com/yihui/xaringan/issues/2) if you do not see the template or addin in RStudio.
-]
-
----
-background-image: url(`r xaringan:::karl`)
-background-position: 50% 50%
-class: center, bottom, inverse
-
-# You only live once!
-
----
-
-# Hello Ninja
-
-As a presentation ninja, you certainly should not be satisfied by the "Hello World" example. You need to understand more about two things:
-
-1. The [remark.js](https://remarkjs.com) library;
-
-1. The **xaringan** package;
-
-Basically **xaringan** injected the chakra of R Markdown (minus Pandoc) into **remark.js**. The slides are rendered by remark.js in the web browser, and the Markdown source needed by remark.js is generated from R Markdown (**knitr**).
-
----
-
-# remark.js
-
-You can see an introduction of remark.js from [its homepage](https://remarkjs.com). You should read the [remark.js Wiki](https://github.com/gnab/remark/wiki) at least once to know how to
-
-- create a new slide (Markdown syntax<sup>*</sup> and slide properties);
-
-- format a slide (e.g. text alignment);
-
-- configure the slideshow;
-
-- and use the presentation (keyboard shortcuts).
-
-It is important to be familiar with remark.js before you can understand the options in **xaringan**.
-
-.footnote[[*] It is different with Pandoc's Markdown! It is limited but should be enough for presentation purposes. Come on... You do not need a slide for the Table of Contents! Well, the Markdown support in remark.js [may be improved](https://github.com/gnab/remark/issues/142) in the future.]
-
----
-background-image: url(`r xaringan:::karl`)
-background-size: cover
-class: center, bottom, inverse
-
-# I was so happy to have discovered remark.js!
-
----
-class: inverse, middle, center
-
-# Using xaringan
-
----
-
-# xaringan
-
-Provides an R Markdown output format `xaringan::moon_reader` as a wrapper for remark.js, and you can use it in the YAML metadata, e.g.
-
-```yaml
----
-title: "A Cool Presentation"
-output:
-  xaringan::moon_reader:
-    yolo: true
-    nature:
-      autoplay: 30000
----
-```
-
-See the help page `?xaringan::moon_reader` for all possible options that you can use.
-
----
-
-# remark.js vs xaringan
-
-Some differences between using remark.js (left) and using **xaringan** (right):
-
-.pull-left[
-1. Start with a boilerplate HTML file;
-
-1. Plain Markdown;
-
-1. Write JavaScript to autoplay slides;
-
-1. Manually configure MathJax;
-
-1. Highlight code with `*`;
-
-1. Edit Markdown source and refresh browser to see updated slides;
-]
-
-.pull-right[
-1. Start with an R Markdown document;
-
-1. R Markdown (can embed R/other code chunks);
-
-1. Provide an option `autoplay`;
-
-1. MathJax just works;<sup>*</sup>
-
-1. Highlight code with `{{}}`;
-
-1. The RStudio addin "Infinite Moon Reader" automatically refreshes slides on changes;
-]
-
-.footnote[[*] Not really. See next page.]
-
----
-
-# Math Expressions
-
-You can write LaTeX math expressions inside a pair of dollar signs, e.g. &#36;\alpha+\beta$ renders $\alpha+\beta$. You can use the display style with double dollar signs:
+plot_metaanalysis
 
 ```
-$$\bar{X}=\frac{1}{n}\sum_{i=1}^nX_i$$
-```
 
-$$\bar{X}=\frac{1}{n}\sum_{i=1}^nX_i$$
-
-Limitations:
-
-1. The source code of a LaTeX math expression must be in one line, unless it is inside a pair of double dollar signs, in which case the starting `$$` must appear in the very beginning of a line, followed immediately by a non-space character, and the ending `$$` must be at the end of a line, led by a non-space character;
-
-1. There should not be spaces after the opening `$` or before the closing `$`.
-
-1. Math does not work on the title slide (see [#61](https://github.com/yihui/xaringan/issues/61) for a workaround).
 
 ---
 
-# R Code
+## Runing a meta-analysis 
 
-```{r comment='#'}
-# a boring regression
-fit = lm(dist ~ 1 + speed, data = cars)
-coef(summary(fit))
-dojutsu = c('地爆天星', '天照', '加具土命', '神威', '須佐能乎', '無限月読')
-grep('天', dojutsu, value = TRUE)
+```{r brm_meta, echo=TRUE, results="hide", cache=TRUE}
+metaanalysis <- brms::brm(
+  estimate | se(std_error) ~ 1 + (1 | study), 
+  data = metaanalysis_data, 
+  control = list(adapt_delta = 0.99))
 ```
 
 ---
-
-# R Plots
-
-```{r cars, fig.height=4, dev='svg'}
-par(mar = c(4, 4, 1, .1))
-plot(cars, pch = 19, col = 'darkgray', las = 1)
-abline(fit, lwd = 2)
-```
-
----
-
-# Tables
-
-If you want to generate a table, make sure it is in the HTML format (instead of Markdown or other formats), e.g.,
 
 ```{r}
-knitr::kable(head(iris), format = 'html')
+summ_meta <- summary(metaanalysis)
+metaanalysis_data %>%
+  select(-std_error) %>%
+  rbind(data.frame(estimate = summ_meta$fixed[,"Estimate"], ci_low = summ_meta$fixed[,"l-95% CI"], ci_high = summ_meta$fixed[,"u-95% CI"], study = "META")) %>%
+  ggplot(aes(x = study, y = estimate, ymin = ci_low, ymax = ci_high)) +
+  geom_hline(yintercept = 0, color = "blue") + 
+  geom_linerange() + 
+  geom_point() + coord_flip() 
+
 ```
 
----
-
-# HTML Widgets
-
-I have not thoroughly tested HTML widgets against **xaringan**. Some may work well, and some may not. It is a little tricky.
-
-Similarly, the Shiny mode (`runtime: shiny`) does not work. I might get these issues fixed in the future, but these are not of high priority to me. I never turn my presentation into a Shiny app. When I need to demonstrate more complicated examples, I just launch them separately. It is convenient to share slides with other people when they are plain HTML/JS applications.
-
-See the next page for two HTML widgets.
 
 ---
 
 
----
+# Further reading
 
-```{r eval=require('DT'), tidy=FALSE}
-DT::datatable(
-  head(iris, 10),
-  fillContainer = FALSE, options = list(pageLength = 8)
-)
-```
+- How to develop a model without overfitting?
+  - Bayesian Workflow https://arxiv.org/abs/2011.01808
 
----
-
-# Some Tips
-
-- Do not forget to try the `yolo` option of `xaringan::moon_reader`.
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        yolo: true
-    ```
-
----
-
-# Some Tips
-
-- Slides can be automatically played if you set the `autoplay` option under `nature`, e.g. go to the next slide every 30 seconds in a lightning talk:
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          autoplay: 30000
-    ```
-
-- If you want to restart the play after it reaches the last slide, you may set the sub-option `loop` to TRUE, e.g.,
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          autoplay:
-            interval: 30000
-            loop: true
-    ```
-
----
-
-# Some Tips
-
-- A countdown timer can be added to every page of the slides using the `countdown` option under `nature`, e.g. if you want to spend one minute on every page when you give the talk, you can set:
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          countdown: 60000
-    ```
-
-    Then you will see a timer counting down from `01:00`, to `00:59`, `00:58`, ... When the time is out, the timer will continue but the time turns red.
-    
----
-
-# Some Tips
-
-- The title slide is created automatically by **xaringan**, but it is just another remark.js slide added before your other slides.
-
-    The title slide is set to `class: center, middle, inverse, title-slide` by default. You can change the classes applied to the title slide with the `titleSlideClass` option of `nature` (`title-slide` is always applied).
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          titleSlideClass: [top, left, inverse]
-    ```
-    
---
-
-- If you'd like to create your own title slide, disable **xaringan**'s title slide with the `seal = FALSE` option of `moon_reader`.
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        seal: false
-    ```
-
----
-
-# Some Tips
-
-- There are several ways to build incremental slides. See [this presentation](https://slides.yihui.org/xaringan/incremental.html) for examples.
-
-- The option `highlightLines: true` of `nature` will highlight code lines that start with `*`, or are wrapped in `{{ }}`, or have trailing comments `#<<`;
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          highlightLines: true
-    ```
-
-    See examples on the next page.
-
----
-
-# Some Tips
-
-
-.pull-left[
-An example using a leading `*`:
-
-    ```r
-    if (TRUE) {
-    ** message("Very important!")
-    }
-    ```
-Output:
-```r
-if (TRUE) {
-* message("Very important!")
-}
-```
-
-This is invalid R code, so it is a plain fenced code block that is not executed.
-]
-
-.pull-right[
-An example using `{{}}`:
-
-````
-`r ''````{r tidy=FALSE}
-if (TRUE) {
-*{{ message("Very important!") }}
-}
-```
-````
-Output:
-```{r tidy=FALSE}
-if (TRUE) {
-{{ message("Very important!") }}
-}
-```
-
-It is valid R code so you can run it. Note that `{{}}` can wrap an R expression of multiple lines.
-]
-
----
-
-# Some Tips
-
-An example of using the trailing comment `#<<` to highlight lines:
-
-````markdown
-`r ''````{r tidy=FALSE}
-library(ggplot2)
-ggplot(mtcars) + 
-  aes(mpg, disp) + 
-  geom_point() +   #<<
-  geom_smooth()    #<<
-```
-````
-
-Output:
-
-```{r tidy=FALSE, eval=FALSE}
-library(ggplot2)
-ggplot(mtcars) + 
-  aes(mpg, disp) + 
-  geom_point() +   #<<
-  geom_smooth()    #<<
-```
-
----
-
-# Some Tips
-
-When you enable line-highlighting, you can also use the chunk option `highlight.output` to highlight specific lines of the text output from a code chunk. For example, `highlight.output = TRUE` means highlighting all lines, and `highlight.output = c(1, 3)` means highlighting the first and third line.
-
-````md
-`r ''````{r, highlight.output=c(1, 3)}
-head(iris)
-```
-````
-
-```{r, highlight.output=c(1, 3), echo=FALSE}
-head(iris)
-```
-
-Question: what does `highlight.output = c(TRUE, FALSE)` mean? (Hint: think about R's recycling of vectors)
-
----
-
-# Some Tips
-
-- To make slides work offline, you need to download a copy of remark.js in advance, because **xaringan** uses the online version by default (see the help page `?xaringan::moon_reader`).
-
-- You can use `xaringan::summon_remark()` to download the latest or a specified version of remark.js. By default, it is downloaded to `libs/remark-latest.min.js`.
-
-- Then change the `chakra` option in YAML to point to this file, e.g.
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        chakra: libs/remark-latest.min.js
-    ```
-
-- If you used Google fonts in slides (the default theme uses _Yanone Kaffeesatz_, _Droid Serif_, and _Source Code Pro_), they won't work offline unless you download or install them locally. The Heroku app [google-webfonts-helper](https://google-webfonts-helper.herokuapp.com/fonts) can help you download fonts and generate the necessary CSS.
-
----
-
-# Macros
-
-- remark.js [allows users to define custom macros](https://github.com/yihui/xaringan/issues/80) (JS functions) that can be applied to Markdown text using the syntax `![:macroName arg1, arg2, ...]` or `![:macroName arg1, arg2, ...](this)`. For example, before remark.js initializes the slides, you can define a macro named `scale`:
-
-    ```js
-    remark.macros.scale = function (percentage) {
-      var url = this;
-      return '<img src="' + url + '" style="width: ' + percentage + '" />';
-    };
-    ```
-
-    Then the Markdown text
-
-    ```markdown
-    ![:scale 50%](image.jpg)
-    ```
-
-    will be translated to
-    
-    ```html
-    <img src="image.jpg" style="width: 50%" />
-    ```
-
----
-
-# Macros (continued)
-
-- To insert macros in **xaringan** slides, you can use the option `beforeInit` under the option `nature`, e.g.,
-
-    ```yaml
-    output:
-      xaringan::moon_reader:
-        nature:
-          beforeInit: "macros.js"
-    ```
-
-    You save your remark.js macros in the file `macros.js`.
-
-- The `beforeInit` option can be used to insert arbitrary JS code before `remark.create()`. Inserting macros is just one of its possible applications.
-
----
-
-# CSS
-
-Among all options in `xaringan::moon_reader`, the most challenging but perhaps also the most rewarding one is `css`, because it allows you to customize the appearance of your slides using any CSS rules or hacks you know.
-
-You can see the default CSS file [here](https://github.com/yihui/xaringan/blob/master/inst/rmarkdown/templates/xaringan/resources/default.css). You can completely replace it with your own CSS files, or define new rules to override the default. See the help page `?xaringan::moon_reader` for more information.
-
----
-
-# CSS
-
-For example, suppose you want to change the font for code from the default "Source Code Pro" to "Ubuntu Mono". You can create a CSS file named, say, `ubuntu-mono.css`:
-
-```css
-@import url(https://fonts.googleapis.com/css?family=Ubuntu+Mono:400,700,400italic);
-
-.remark-code, .remark-inline-code { font-family: 'Ubuntu Mono'; }
-```
-
-Then set the `css` option in the YAML metadata:
-
-```yaml
-output:
-  xaringan::moon_reader:
-    css: ["default", "ubuntu-mono.css"]
-```
-
-Here I assume `ubuntu-mono.css` is under the same directory as your Rmd.
-
-See [yihui/xaringan#83](https://github.com/yihui/xaringan/issues/83) for an example of using the [Fira Code](https://github.com/tonsky/FiraCode) font, which supports ligatures in program code.
-
----
-
-# Themes
-
-Don't want to learn CSS? Okay, you can use some user-contributed themes. A theme typically consists of two CSS files `foo.css` and `foo-fonts.css`, where `foo` is the theme name. Below are some existing themes:
-
-```{r, R.options=list(width = 70)}
-names(xaringan:::list_css())
-```
-
----
-
-# Themes
-
-To use a theme, you can specify the `css` option as an array of CSS filenames (without the `.css` extensions), e.g.,
-
-```yaml
-output:
-  xaringan::moon_reader:
-    css: [default, metropolis, metropolis-fonts]
-```
-
-If you want to contribute a theme to **xaringan**, please read [this blog post](https://yihui.org/en/2017/10/xaringan-themes).
-
----
-class: inverse, middle, center
-background-image: url(https://upload.wikimedia.org/wikipedia/commons/3/39/Naruto_Shiki_Fujin.svg)
-background-size: contain
-
-# Naruto
-
----
-background-image: url(https://upload.wikimedia.org/wikipedia/commons/b/be/Sharingan_triple.svg)
-background-size: 100px
-background-position: 90% 8%
-
-# Sharingan
-
-The R package name **xaringan** was derived<sup>1</sup> from **Sharingan**, a dōjutsu in the Japanese anime _Naruto_ with two abilities:
-
-- the "Eye of Insight"
-
-- the "Eye of Hypnotism"
-
-I think a presentation is basically a way to communicate insights to the audience, and a great presentation may even "hypnotize" the audience.<sup>2,3</sup>
-
-.footnote[
-[1] In Chinese, the pronounciation of _X_ is _Sh_ /ʃ/ (as in _shrimp_). Now you should have a better idea of how to pronounce my last name _Xie_.
-
-[2] By comparison, bad presentations only put the audience to sleep.
-
-[3] Personally I find that setting background images for slides is a killer feature of remark.js. It is an effective way to bring visual impact into your presentations.
-]
-
----
-
-# Naruto terminology
-
-The **xaringan** package borrowed a few terms from Naruto, such as
-
-- [Sharingan](https://naruto.fandom.com/wiki/Sharingan) (写輪眼; the package name)
-
-- The [moon reader](https://naruto.fandom.com/wiki/Moon_Reader) (月読; an attractive R Markdown output format)
-
-- [Chakra](https://naruto.fandom.com/wiki/Chakra) (查克拉; the path to the remark.js library, which is the power to drive the presentation)
-
-- [Nature transformation](https://naruto.fandom.com/wiki/Nature_Transformation) (性質変化; transform the chakra by setting different options)
-
-- The [infinite moon reader](https://naruto.fandom.com/wiki/Infinite_Tsukuyomi) (無限月読; start a local web server to continuously serve your slides)
-
-- The [summoning technique](https://naruto.fandom.com/wiki/Summoning_Technique) (download remark.js from the web)
-
-You can click the links to know more about them if you want. The jutsu "Moon Reader" may seem a little evil, but that does not mean your slides are evil.
-
----
-
-class: center
-
-# Hand seals (印)
-
-Press `h` or `?` to see the possible ninjutsu you can use in remark.js.
-
-![](https://upload.wikimedia.org/wikipedia/commons/7/7e/Mudra-Naruto-KageBunshin.svg)
-
----
-
-class: center, middle
-
-# Thanks!
-
-Slides created via the R package [**xaringan**](https://github.com/yihui/xaringan).
-
-The chakra comes from [remark.js](https://remarkjs.com), [**knitr**](https://yihui.org/knitr), and [R Markdown](https://rmarkdown.rstudio.com).
+## Thanks!
